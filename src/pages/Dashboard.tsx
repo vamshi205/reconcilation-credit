@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { StorageService, DashboardStats } from "../services/storageService";
+import { fetchTransactionsFromSheets, isGoogleSheetsConfigured } from "../services/googleSheetsService";
+import { Transaction } from "../types/transaction";
 import { formatCurrency } from "../lib/utils";
 import { DollarSign, AlertCircle, CheckCircle, TrendingUp } from "lucide-react";
 import { Input } from "../components/ui/Input";
@@ -23,16 +25,110 @@ export function Dashboard() {
 
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
+  // Load transactions from Google Sheets
   useEffect(() => {
-    const updateStats = () => {
-      setStats(StorageService.getDashboardStats(dateFrom || undefined, dateTo || undefined));
+    const loadTransactions = async () => {
+      if (isGoogleSheetsConfigured()) {
+        try {
+          const sheetsTransactions = await fetchTransactionsFromSheets();
+          // Only show deposits (credits)
+          const creditTransactions = sheetsTransactions.filter((t) => t.type === "credit");
+          setTransactions(creditTransactions);
+        } catch (error) {
+          console.error('Error fetching transactions for dashboard:', error);
+          setTransactions([]);
+        }
+      } else {
+        // Fallback to local storage if Google Sheets not configured
+        const localTransactions = StorageService.getTransactions();
+        const creditTransactions = localTransactions.filter((t) => t.type === "credit");
+        setTransactions(creditTransactions);
+      }
     };
-    updateStats();
-    // Update stats every 2 seconds to reflect changes
-    const interval = setInterval(updateStats, 2000);
+    
+    loadTransactions();
+    // Update stats every 5 seconds to reflect changes
+    const interval = setInterval(loadTransactions, 5000);
     return () => clearInterval(interval);
-  }, [dateFrom, dateTo]);
+  }, []);
+
+  // Calculate stats from transactions
+  useEffect(() => {
+    const calculateStats = (): DashboardStats => {
+      let filteredTransactions = [...transactions];
+      
+      // Apply date filter if provided
+      if (dateFrom || dateTo) {
+        filteredTransactions = filteredTransactions.filter((t) => {
+          const tDate = new Date(t.date);
+          if (dateFrom && tDate < new Date(dateFrom)) return false;
+          if (dateTo) {
+            const toDate = new Date(dateTo);
+            toDate.setHours(23, 59, 59, 999);
+            if (tDate > toDate) return false;
+          }
+          return true;
+        });
+      }
+
+      // Migrate legacy inVyapar to added_to_vyapar
+      filteredTransactions = filteredTransactions.map((t) => {
+        if (t.inVyapar !== undefined && t.added_to_vyapar === undefined) {
+          t.added_to_vyapar = t.inVyapar;
+        }
+        return t;
+      });
+
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+      const totalDepositAmount = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
+
+      // Pending: not added to vyapar AND not on hold (or on hold but no ref number)
+      const pendingTransactions = filteredTransactions.filter(
+        (t) => !t.added_to_vyapar && !t.inVyapar && (!t.hold || !t.vyapar_reference_number)
+      );
+      const pendingAmount = pendingTransactions.reduce((sum, t) => sum + t.amount, 0);
+      const pendingCount = pendingTransactions.length;
+
+      // Completed: added to vyapar AND has reference number (or was on hold but now completed)
+      const completedTransactions = filteredTransactions.filter(
+        (t) => (t.added_to_vyapar || t.inVyapar) && t.vyapar_reference_number && String(t.vyapar_reference_number).trim() !== ''
+      );
+      const completedAmount = completedTransactions.reduce((sum, t) => sum + t.amount, 0);
+
+      // Legacy stats
+      const totalCredits = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
+      const totalDebits = 0; // No debits in this system
+      const netBalance = totalCredits - totalDebits;
+      const pendingSyncCount = pendingCount;
+
+      const transactionsThisMonth = filteredTransactions.filter(
+        (t) => new Date(t.date) >= startOfMonth
+      ).length;
+      const transactionsThisYear = filteredTransactions.filter(
+        (t) => new Date(t.date) >= startOfYear
+      ).length;
+
+      return {
+        totalDepositAmount,
+        pendingAmount,
+        completedAmount,
+        pendingCount,
+        totalCredits,
+        totalDebits,
+        netBalance,
+        pendingSyncCount,
+        transactionsThisMonth,
+        transactionsThisYear,
+      };
+    };
+
+    setStats(calculateStats());
+  }, [transactions, dateFrom, dateTo]);
 
   const handleClearFilters = () => {
     setDateFrom("");

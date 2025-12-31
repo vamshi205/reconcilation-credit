@@ -6,6 +6,7 @@ import { CSVUpload } from "./pages/CSVUpload";
 import { Transactions } from "./pages/Transactions";
 import { Reconciliation } from "./pages/Reconciliation";
 import { Parties } from "./pages/Parties";
+import { PartyMappings } from "./pages/PartyMappings";
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/reconciliation" element={<Reconciliation />} />
             <Route path="/parties" element={<Parties />} />
+            <Route path="/party-mappings" element={<PartyMappings />} />
           </Routes>
         </main>
       </div>

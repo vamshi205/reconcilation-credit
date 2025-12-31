@@ -24,6 +24,7 @@ export interface Transaction {
   bankAccount?: string;
   added_to_vyapar: boolean; // Renamed from inVyapar for consistency
   vyapar_reference_number?: string; // Vyapar reference number
+  hold?: boolean; // Hold status - transaction is on hold
   notes?: string;
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string

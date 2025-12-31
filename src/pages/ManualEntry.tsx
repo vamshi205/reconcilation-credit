@@ -72,7 +72,18 @@ export function ManualEntry() {
         updatedAt: new Date().toISOString(),
       };
 
+      // NO LOCAL STORAGE - Save directly to Google Sheets
       StorageService.addTransaction(transaction);
+      
+      // Save to Google Sheets if configured
+      if (isGoogleSheetsConfigured()) {
+        try {
+          await saveTransactionToSheets(transaction);
+        } catch (error) {
+          console.error('Error saving to Google Sheets:', error);
+        }
+      }
+      
       StorageService.updatePartyBalance(
         transaction.partyName,
         transaction.amount,

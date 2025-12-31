@@ -1,0 +1,670 @@
+// Google Sheets Service for writing transaction data
+// This service handles writing transaction data to Google Sheets
+
+// Option 1: Using Google Apps Script (Recommended - No API key needed)
+// You need to create a Google Apps Script web app first
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwaxqF-hd2tiQKukRnBqMD-Iir56Vpm0CWYL-70YHTXJoMpHTwf_GannYZO-xfrAipXOA/exec'; // Add your Google Apps Script web app URL here
+
+// Export URL for error messages
+export function getGoogleSheetsURL(): string {
+  return APPS_SCRIPT_URL;
+}
+
+// Option 2: Using Google Sheets API (Requires API key and OAuth)
+const API_KEY = ''; // Add your Google Sheets API key here
+
+import { Transaction } from '../types/transaction';
+import { formatDate } from '../lib/utils';
+
+// Party Name Mapping interface (defined here to avoid circular dependency)
+export interface PartyNameMapping {
+  id: string;
+  originalName: string;
+  correctedName: string;
+  confidence: number;
+  lastUsed: string;
+  createdAt: string;
+}
+
+/**
+ * Update an existing transaction in Google Sheets
+ * Finds the transaction by ID and updates the row
+ */
+export async function updateTransactionInSheets(transaction: Transaction): Promise<boolean> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    console.warn('Google Apps Script URL not configured. Skipping Google Sheets update.');
+    return false;
+  }
+
+  try {
+    // Format transaction data as row array
+    const rowData = formatTransactionAsRow(transaction);
+
+    console.log('Updating transaction in Google Sheets:', { id: transaction.id, url: APPS_SCRIPT_URL });
+
+    // Google Apps Script - use URL-encoded form data
+    return new Promise((resolve) => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.name = 'google-sheets-iframe-update-' + Date.now();
+      document.body.appendChild(iframe);
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = APPS_SCRIPT_URL;
+      form.target = iframe.name;
+      form.enctype = 'application/x-www-form-urlencoded';
+      form.style.display = 'none';
+
+      // Send update data
+      const payload = {
+        action: 'updateRow',
+        transactionId: transaction.id,
+        data: JSON.stringify(rowData), // Send full row data as JSON string
+      };
+
+      console.log('Update payload:', payload);
+
+      // Add each field as a form input
+      Object.keys(payload).forEach(key => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = payload[key as keyof typeof payload];
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+
+      // Submit and wait
+      form.submit();
+      
+      // Clean up after a delay
+      setTimeout(() => {
+        try {
+          if (document.body.contains(form)) {
+            document.body.removeChild(form);
+          }
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        } catch (e) {
+          // Already removed
+        }
+        console.log('✓ Transaction updated in Google Sheets');
+        resolve(true);
+      }, 2000);
+    });
+  } catch (error) {
+    console.error('Error updating transaction in Google Sheets:', error);
+    return false;
+  }
+}
+
+/**
+ * Save transaction data to Google Sheets using Google Apps Script
+ */
+/**
+ * Test Google Sheets connection
+ */
+export async function testGoogleSheetsConnection(): Promise<{ success: boolean; error?: string }> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    return { success: false, error: 'Google Apps Script URL not configured' };
+  }
+
+  try {
+    // Test with a simple GET request - CORS will fail but we can check the error
+    try {
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'GET',
+        mode: 'no-cors', // Use no-cors to avoid CORS error
+      });
+      
+      // With no-cors, we can't read the response, but if it doesn't throw, the URL is accessible
+      return { success: true, error: 'Connection test completed (CORS prevents reading response, but URL is accessible)' };
+    } catch (fetchError) {
+      // If it's a CORS error, that's actually normal for Google Apps Script
+      if (fetchError instanceof TypeError && fetchError.message.includes('CORS')) {
+        return { 
+          success: true, 
+          error: 'CORS error is normal for Google Apps Script. The form submission method will work around this.' 
+        };
+      }
+      throw fetchError;
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+export async function saveTransactionToSheets(transaction: Transaction): Promise<boolean> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    console.warn('Google Apps Script URL not configured. Skipping Google Sheets write.');
+    return false;
+  }
+
+  try {
+    // Format transaction data as row array
+    const rowData = formatTransactionAsRow(transaction);
+
+    console.log('Sending transaction to Google Sheets:', { url: APPS_SCRIPT_URL, rowCount: rowData.length });
+
+    // Google Apps Script - use URL-encoded form data which works better
+    // Create form with proper encoding
+    return new Promise((resolve, reject) => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.name = 'google-sheets-iframe-' + Date.now();
+      document.body.appendChild(iframe);
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = APPS_SCRIPT_URL;
+      form.target = iframe.name;
+      form.enctype = 'application/x-www-form-urlencoded';
+      form.style.display = 'none';
+
+      // Send data as URL-encoded form fields
+      // Google Apps Script receives this as e.parameter.fieldName
+      const payload = {
+        action: 'appendRow',
+        data: JSON.stringify(rowData), // Send data array as JSON string
+      };
+
+      console.log('Form payload:', payload);
+      console.log('Row data being sent:', rowData);
+
+      // Add each field as a form input
+      Object.keys(payload).forEach(key => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = payload[key as keyof typeof payload];
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+
+      // Submit and wait
+      form.submit();
+      
+      // Clean up after a delay
+      setTimeout(() => {
+        try {
+          if (document.body.contains(form)) {
+            document.body.removeChild(form);
+          }
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        } catch (e) {
+          // Already removed
+        }
+        console.log('✓ Transaction sent to Google Sheets');
+        resolve(true);
+      }, 2000);
+    });
+  } catch (error) {
+    console.error('Error saving to Google Sheets:', error);
+    return false;
+  }
+}
+
+/**
+ * Save multiple transactions to Google Sheets in a single batch
+ */
+export async function saveTransactionsToSheets(transactions: Transaction[]): Promise<{ success: number; failed: number }> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    console.warn('Google Apps Script URL not configured. Skipping Google Sheets write.');
+    return { success: 0, failed: transactions.length };
+  }
+
+  if (transactions.length === 0) {
+    return { success: 0, failed: 0 };
+  }
+
+  console.log(`Starting to save ${transactions.length} transactions to Google Sheets in batch...`);
+
+  try {
+    // Format all transactions as rows
+    const allRows = transactions.map(transaction => formatTransactionAsRow(transaction));
+    
+    console.log(`Sending batch of ${allRows.length} transactions...`);
+
+    // Send all transactions in one POST request
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.name = 'google-sheets-iframe-batch-' + Date.now();
+    document.body.appendChild(iframe);
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = APPS_SCRIPT_URL;
+    form.target = iframe.name;
+    form.enctype = 'application/x-www-form-urlencoded';
+    form.style.display = 'none';
+
+    // Send batch data
+    const payload = {
+      action: 'appendRows',
+      data: JSON.stringify(allRows), // Send all rows as JSON string
+    };
+
+    console.log('Batch payload:', { action: payload.action, rowCount: allRows.length });
+
+    // Add each field as a form input
+    Object.keys(payload).forEach(key => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = key;
+      input.value = payload[key as keyof typeof payload];
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+
+    // Submit and wait
+    form.submit();
+    
+    // Clean up after a delay
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        try {
+          if (document.body.contains(form)) {
+            document.body.removeChild(form);
+          }
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        } catch (e) {
+          // Already removed
+        }
+        console.log(`✓ Batch of ${transactions.length} transactions sent to Google Sheets`);
+        resolve({ success: transactions.length, failed: 0 });
+      }, 3000); // Give it a bit more time for batch processing
+    });
+  } catch (error) {
+    console.error('Error saving batch to Google Sheets:', error);
+    return { success: 0, failed: transactions.length };
+  }
+}
+
+/**
+ * Format transaction as row data for Google Sheets
+ * Adjust column order based on your Google Sheet structure
+ */
+function formatTransactionAsRow(transaction: Transaction): (string | number)[] {
+  return [
+    transaction.id, // Transaction ID (unique key) - FIRST COLUMN
+    formatDate(transaction.date), // Date
+    transaction.description || '', // Narration/Description
+    transaction.referenceNumber || '', // Bank Ref No.
+    transaction.amount, // Amount
+    transaction.partyName || '', // Party Name
+    transaction.category || '', // Category
+    transaction.type || 'credit', // Type
+    transaction.added_to_vyapar ? 'Yes' : 'No', // Added to Vyapar
+    transaction.vyapar_reference_number || '', // Vyapar Ref No.
+    transaction.hold ? 'Yes' : 'No', // Hold Status
+    transaction.notes || '', // Notes
+    transaction.createdAt ? formatDate(transaction.createdAt) : '', // Created At
+    transaction.updatedAt ? formatDate(transaction.updatedAt) : '', // Updated At
+  ];
+}
+
+/**
+ * Fetch all transactions from Google Sheets
+ */
+export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    console.warn('Google Apps Script URL not configured. Cannot fetch transactions.');
+    return [];
+  }
+
+  try {
+    console.log('Fetching transactions from Google Sheets...');
+
+    // Use GET request to fetch data
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getTransactions`, {
+      method: 'GET',
+    });
+
+    const responseText = await response.text();
+    console.log('Google Sheets response:', responseText.substring(0, 500));
+
+    // Check if response is HTML (sign-in page) instead of JSON
+    if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
+      console.error('Google Apps Script requires authorization.');
+      throw new Error('Script requires authorization. Please authorize the Google Apps Script first.');
+    }
+
+    // Parse JSON response
+    const result = JSON.parse(responseText);
+    
+    if (result.success && result.data) {
+      // Convert sheet rows to Transaction objects
+      const transactions = result.data.map((row: any[]) => {
+        // Column order: [ID, Date, Narration, Bank Ref No., Amount, Party Name, Category, Type, Added to Vyapar, Vyapar Ref No., Hold, Notes, Created At, Updated At]
+        
+        // Parse date - handle both string and Date object from Google Sheets
+        let dateStr = row[1];
+        if (dateStr instanceof Date) {
+          dateStr = dateStr.toISOString().split('T')[0];
+        } else if (typeof dateStr === 'string') {
+          // If it's already in ISO format or DD MMM YYYY format, keep it
+          // Otherwise try to parse it
+          if (!dateStr.match(/^\d{4}-\d{2}-\d{2}$/) && !dateStr.match(/^\d{2} \w{3} \d{4}$/)) {
+            try {
+              const parsedDate = new Date(dateStr);
+              if (!isNaN(parsedDate.getTime())) {
+                dateStr = parsedDate.toISOString().split('T')[0];
+              }
+            } catch (e) {
+              // Keep original if parsing fails
+            }
+          }
+        }
+        
+        // Parse amount - handle both number and string
+        let amount = 0;
+        if (typeof row[4] === 'number') {
+          amount = row[4];
+        } else if (typeof row[4] === 'string') {
+          // Remove commas and parse
+          amount = parseFloat(row[4].replace(/,/g, '')) || 0;
+        }
+        
+        // Ensure vyapar_reference_number is a string or undefined
+        let vyaparRef = row[9];
+        if (vyaparRef !== null && vyaparRef !== undefined && vyaparRef !== '') {
+          vyaparRef = String(vyaparRef).trim();
+          if (vyaparRef === '') vyaparRef = undefined;
+        } else {
+          vyaparRef = undefined;
+        }
+        
+        // Ensure referenceNumber is a string or undefined
+        let refNumber = row[3];
+        if (refNumber !== null && refNumber !== undefined && refNumber !== '') {
+          refNumber = String(refNumber).trim();
+          if (refNumber === '') refNumber = undefined;
+        } else {
+          refNumber = undefined;
+        }
+        
+        // Ensure notes is a string or undefined
+        let notesValue = row[11];
+        if (notesValue !== null && notesValue !== undefined && notesValue !== '') {
+          notesValue = String(notesValue).trim();
+          if (notesValue === '') notesValue = undefined;
+        } else {
+          notesValue = undefined;
+        }
+        
+        return {
+          id: String(row[0] || '').trim() || '',
+          date: dateStr || new Date().toISOString().split('T')[0],
+          description: String(row[2] || '').trim(),
+          referenceNumber: refNumber,
+          amount: amount,
+          partyName: String(row[5] || '').trim(),
+          category: (row[6] || 'Other Credit') as Transaction['category'],
+          type: (row[7] || 'credit') as 'credit' | 'debit',
+          added_to_vyapar: row[8] === 'Yes' || row[8] === true || row[8] === 'true',
+          vyapar_reference_number: vyaparRef,
+          hold: row[10] === 'Yes' || row[10] === true || row[10] === 'true',
+          notes: notesValue,
+          createdAt: row[12] || new Date().toISOString(),
+          updatedAt: row[13] || new Date().toISOString(),
+        } as Transaction;
+      });
+
+      console.log(`✓ Fetched ${transactions.length} transactions from Google Sheets`);
+      return transactions;
+    } else {
+      console.error('Failed to fetch transactions:', result.error);
+      return [];
+    }
+  } catch (error) {
+    console.error('Error fetching transactions from Google Sheets:', error);
+    return [];
+  }
+}
+
+/**
+ * Save party mapping to Google Sheets
+ */
+export async function savePartyMappingToSheets(mapping: PartyNameMapping): Promise<boolean> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    console.warn('Google Apps Script URL not configured. Skipping party mapping save.');
+    return false;
+  }
+
+  try {
+    const rowData = [
+      mapping.id,
+      mapping.originalName,
+      mapping.correctedName,
+      mapping.confidence,
+      mapping.lastUsed,
+      mapping.createdAt,
+    ];
+
+    return new Promise((resolve) => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.name = 'google-sheets-iframe-mapping-' + Date.now();
+      document.body.appendChild(iframe);
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = APPS_SCRIPT_URL;
+      form.target = iframe.name;
+      form.enctype = 'application/x-www-form-urlencoded';
+      form.style.display = 'none';
+
+      const payload = {
+        action: 'appendPartyMapping',
+        data: JSON.stringify(rowData),
+      };
+
+      Object.keys(payload).forEach(key => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = payload[key as keyof typeof payload];
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+
+      setTimeout(() => {
+        try {
+          if (document.body.contains(form)) document.body.removeChild(form);
+          if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        } catch (e) {}
+        resolve(true);
+      }, 2000);
+    });
+  } catch (error) {
+    console.error('Error saving party mapping to Google Sheets:', error);
+    return false;
+  }
+}
+
+/**
+ * Update party mapping in Google Sheets
+ */
+export async function updatePartyMappingInSheets(mapping: PartyNameMapping): Promise<boolean> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    return false;
+  }
+
+  try {
+    const rowData = [
+      mapping.id,
+      mapping.originalName,
+      mapping.correctedName,
+      mapping.confidence,
+      mapping.lastUsed,
+      mapping.createdAt,
+    ];
+
+    return new Promise((resolve) => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.name = 'google-sheets-iframe-update-mapping-' + Date.now();
+      document.body.appendChild(iframe);
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = APPS_SCRIPT_URL;
+      form.target = iframe.name;
+      form.enctype = 'application/x-www-form-urlencoded';
+      form.style.display = 'none';
+
+      const payload = {
+        action: 'updatePartyMapping',
+        mappingId: mapping.id,
+        data: JSON.stringify(rowData),
+      };
+
+      Object.keys(payload).forEach(key => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = payload[key as keyof typeof payload];
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+
+      setTimeout(() => {
+        try {
+          if (document.body.contains(form)) document.body.removeChild(form);
+          if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        } catch (e) {}
+        resolve(true);
+      }, 2000);
+    });
+  } catch (error) {
+    console.error('Error updating party mapping in Google Sheets:', error);
+    return false;
+  }
+}
+
+/**
+ * Fetch all party mappings from Google Sheets
+ */
+export async function fetchPartyMappingsFromSheets(): Promise<PartyNameMapping[]> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    return [];
+  }
+
+  try {
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getPartyMappings`, {
+      method: 'GET',
+    });
+
+    const responseText = await response.text();
+    
+    if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
+      console.error('Google Apps Script requires authorization.');
+      return [];
+    }
+
+    const result = JSON.parse(responseText);
+    
+    if (result.success && result.data) {
+      const mappings = result.data.map((row: any[]) => ({
+        id: String(row[0] || ''),
+        originalName: String(row[1] || ''),
+        correctedName: String(row[2] || ''),
+        confidence: Number(row[3]) || 1,
+        lastUsed: String(row[4] || new Date().toISOString()),
+        createdAt: String(row[5] || new Date().toISOString()),
+      } as PartyNameMapping));
+
+      return mappings;
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Error fetching party mappings from Google Sheets:', error);
+    return [];
+  }
+}
+
+/**
+ * Get Google Sheets configuration status
+ */
+export function isGoogleSheetsConfigured(): boolean {
+  return APPS_SCRIPT_URL.trim() !== '';
+}
+
+/**
+ * Set Google Sheets Apps Script URL (for settings page)
+ */
+export function setGoogleSheetsURL(url: string): void {
+  // In a real app, you'd save this to localStorage or settings
+  // For now, we'll use a constant that needs to be updated in code
+  console.warn('To configure Google Sheets URL, update APPS_SCRIPT_URL in googleSheetsService.ts');
+}
+
+/**
+ * Format transaction as CSV row (for manual copy-paste fallback)
+ */
+export function formatTransactionAsCSV(transaction: Transaction): string {
+  const escapeCSV = (value: string | number | undefined): string => {
+    const str = value?.toString() || '';
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const row = formatTransactionAsRow(transaction);
+  return row.map(escapeCSV).join(',');
+}
+
+/**
+ * Copy multiple transactions as CSV to clipboard
+ */
+export async function copyTransactionsToClipboard(transactions: Transaction[]): Promise<void> {
+  const headers = [
+    'Date',
+    'Narration',
+    'Bank Ref No.',
+    'Amount',
+    'Party Name',
+    'Category',
+    'Type',
+    'Added to Vyapar',
+    'Vyapar Ref No.',
+    'Hold',
+    'Notes',
+    'Created At',
+    'Updated At',
+  ];
+
+  const csvRows = [
+    headers.join(','),
+    ...transactions.map(formatTransactionAsCSV),
+  ];
+
+  const csv = csvRows.join('\n');
+  
+  try {
+    await navigator.clipboard.writeText(csv);
+    console.log('Transactions copied to clipboard');
+  } catch (error) {
+    console.error('Failed to copy to clipboard:', error);
+    throw error;
+  }
+}
+

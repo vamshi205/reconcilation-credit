@@ -1,4 +1,6 @@
 import { Transaction, Party, DashboardStats } from "../types/transaction";
+import { PartyMappingService } from "./partyMappingService";
+import { updateTransactionInSheets, isGoogleSheetsConfigured } from "./googleSheetsService";
 
 const STORAGE_KEYS = {
   TRANSACTIONS: "credit_transactions",
@@ -17,30 +19,54 @@ export class StorageService {
   }
 
   static addTransaction(transaction: Transaction): void {
-    const transactions = this.getTransactions();
     // Ensure new fields are set
     if (transaction.added_to_vyapar === undefined) {
       transaction.added_to_vyapar = transaction.inVyapar || false;
     }
-    transactions.push(transaction);
-    this.saveTransactions(transactions);
+    
+    // NO LOCAL STORAGE - Only sync to Google Sheets
+    // Transactions are now stored only in Google Sheets
+    
+    // AUTOMATIC TRAINING: Learn from narration automatically
+    // System trains itself from narrations even when party name is blank
+    if (transaction.description) {
+      PartyMappingService.autoTrainFromNarration(
+        transaction.description,
+        transaction.partyName || undefined
+      );
+    }
   }
 
-  static updateTransaction(id: string, updates: Partial<Transaction>): void {
-    const transactions = this.getTransactions();
-    const index = transactions.findIndex((t) => t.id === id);
-    if (index !== -1) {
-      const transaction = transactions[index];
-      // Migrate legacy inVyapar to added_to_vyapar
-      if (transaction.inVyapar !== undefined && transaction.added_to_vyapar === undefined) {
-        transaction.added_to_vyapar = transaction.inVyapar;
-      }
-      transactions[index] = {
-        ...transaction,
+  static updateTransaction(id: string, updates: Partial<Transaction>, fullTransaction?: Transaction): void {
+    // NO LOCAL STORAGE - Only sync to Google Sheets
+    // We need the full transaction object to update Google Sheets
+    
+    // AUTOMATIC TRAINING: If party name was updated, train from narration
+    if (updates.partyName !== undefined && fullTransaction?.description) {
+      const updatedTransaction = { ...fullTransaction, ...updates };
+      PartyMappingService.autoTrainFromNarration(
+        updatedTransaction.description,
+        updatedTransaction.partyName || undefined
+      ).catch(err => {
+        console.error('Error training party mapping:', err);
+      });
+    }
+
+    // SYNC TO GOOGLE SHEETS: Update transaction in Google Sheets if configured
+    if (isGoogleSheetsConfigured() && fullTransaction) {
+      const updatedTransaction = {
+        ...fullTransaction,
         ...updates,
         updatedAt: new Date().toISOString(),
       };
-      this.saveTransactions(transactions);
+      // Update asynchronously (don't block the UI)
+      updateTransactionInSheets(updatedTransaction).catch(error => {
+        console.error('Failed to sync transaction update to Google Sheets:', error);
+      });
+    } else if (!isGoogleSheetsConfigured()) {
+      console.warn('Google Sheets not configured. Transaction update will not be saved.');
+    } else if (!fullTransaction) {
+      console.warn('Full transaction object not provided. Cannot update Google Sheets.');
     }
   }
 

@@ -303,8 +303,8 @@ export class BankCSVParser {
       );
     }
 
-    // Extract party name from narration (if possible)
-    const partyName = this.extractPartyName(narration);
+    // Leave party name blank - user will enter it manually and system will learn
+    const partyName = "";
 
     // Auto-categorize
     const category = this.autoCategorize(narration);
@@ -403,25 +403,56 @@ export class BankCSVParser {
   static extractPartyName(description: string): string {
     if (!description) return "Unknown";
 
-    // Common patterns
-    const upiMatch = description.match(/UPI[\/\-]([^\/\-\d]+)/i);
+    // Clean the description first
+    let cleaned = description.trim();
+    if (!cleaned) return "Unknown";
+
+    // Common patterns for UPI/NEFT/IMPS - extract party name from these patterns
+    const upiMatch = cleaned.match(/UPI[\/\-]([^\/\-\d]+)/i);
     if (upiMatch) {
       return upiMatch[1].trim();
     }
 
-    const neftMatch = description.match(/NEFT[\/\-]([^\/\-]+)/i);
+    const neftMatch = cleaned.match(/NEFT[\/\-]([^\/\-]+)/i);
     if (neftMatch) {
       return neftMatch[1].replace(/\d+/g, "").trim();
     }
 
-    const impsMatch = description.match(/IMPS[\/\-]([^\/\-]+)/i);
+    const impsMatch = cleaned.match(/IMPS[\/\-]([^\/\-]+)/i);
     if (impsMatch) {
       return impsMatch[1].trim();
     }
 
-    // If no pattern found, return first few words
-    const words = description.split(/\s+/).filter((w) => w.length > 2);
-    return words.slice(0, 2).join(" ") || "Unknown";
+    // For most bank statements, the narration itself contains the party name
+    // Clean it up by removing transaction codes and numbers, but keep the party name
+    let partyName = cleaned;
+
+    // Remove transaction reference numbers and IDs (but keep party names)
+    partyName = partyName
+      .replace(/REF\s*NO[:\-]?\s*[A-Z0-9]+/gi, " ")
+      .replace(/TXN\s*ID[:\-]?\s*[A-Z0-9]+/gi, " ")
+      .replace(/UTR[:\-]?\s*[A-Z0-9]+/gi, " ")
+      .replace(/CHQ\s*NO[:\-]?\s*[A-Z0-9]+/gi, " ")
+      .replace(/\b\d{10,}\b/g, " ") // Remove long account numbers
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // If the cleaned narration is still meaningful (more than just transaction codes)
+    if (partyName.length > 2) {
+      // Remove common transaction type words that might be at the start
+      const transactionTypes = /^(RTGS|NEFT|IMPS|UPI|CHEQUE|CHQ|TRANSFER|CREDIT|DEBIT|PAYMENT|RECEIVED|BY|TO|FROM)\s+/i;
+      partyName = partyName.replace(transactionTypes, "").trim();
+
+      // If we still have content, use it (this is likely the party name)
+      if (partyName.length > 2) {
+        // Return the cleaned narration (up to reasonable length)
+        // Many narrations are just party names, so use them as-is
+        return partyName.length > 100 ? partyName.substring(0, 100).trim() : partyName;
+      }
+    }
+
+    // Final fallback: use the original description (many narrations ARE the party name)
+    return cleaned.length > 100 ? cleaned.substring(0, 100).trim() : cleaned;
   }
 
   static autoCategorize(description: string): "Credit Sale" | "Payment Received" | "Refund" | "Loan/Credit" | "Interest Income" | "Other Credit" {

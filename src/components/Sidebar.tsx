@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Home, Plus, Upload, List, CheckSquare, Users, Menu, X } from "lucide-react";
+import { Home, Plus, Upload, List, CheckSquare, Users, Menu, X, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../lib/utils";
 
@@ -10,6 +10,7 @@ const navigation = [
   { name: "Transactions", href: "/transactions", icon: List },
   { name: "Reconciliation", href: "/reconciliation", icon: CheckSquare },
   { name: "Parties", href: "/parties", icon: Users },
+  { name: "Party Mappings", href: "/party-mappings", icon: Sparkles },
 ];
 
 export function Sidebar() {
