@@ -4,22 +4,39 @@ import { StorageService } from "../services/storageService";
 import { PartyMappingService } from "../services/partyMappingService";
 import { fetchTransactionsFromSheets, isGoogleSheetsConfigured } from "../services/googleSheetsService";
 import { formatDate } from "../lib/utils";
+import { DatePicker } from "../components/ui/DatePicker";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Button } from "../components/ui/Button";
-import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw } from "lucide-react";
+import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Label } from "../components/ui/Label";
+import { Modal } from "../components/ui/Modal";
 
-type ViewType = "pending" | "completed" | "hold";
+type ViewType = "pending" | "completed" | "hold" | "selfTransfer";
 
 export function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [view, setView] = useState<ViewType>("pending");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // Date filters - local to each view
+  const [dateFromPending, setDateFromPending] = useState("");
+  const [dateToPending, setDateToPending] = useState("");
+  const [dateFromCompleted, setDateFromCompleted] = useState("");
+  const [dateToCompleted, setDateToCompleted] = useState("");
+  const [dateFromHold, setDateFromHold] = useState("");
+  const [dateToHold, setDateToHold] = useState("");
+  const [dateFromSelfTransfer, setDateFromSelfTransfer] = useState("");
+  const [dateToSelfTransfer, setDateToSelfTransfer] = useState("");
+  
+  // Get current view's date filters
+  const dateFrom = view === "pending" ? dateFromPending : 
+                   view === "completed" ? dateFromCompleted :
+                   view === "hold" ? dateFromHold : dateFromSelfTransfer;
+  const dateTo = view === "pending" ? dateToPending : 
+                 view === "completed" ? dateToCompleted :
+                 view === "hold" ? dateToHold : dateToSelfTransfer;
   // Local state for input values to prevent focus loss
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const focusedInputId = useRef<string | null>(null);
@@ -33,6 +50,16 @@ export function Transactions() {
   const [partySuggestions, setPartySuggestions] = useState<Record<string, string | null>>({});
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  // View mode for pending transactions (list or grid)
+  const [pendingViewMode, setPendingViewMode] = useState<"list" | "grid">("list");
+  // Sort state for date field
+  const [dateSort, setDateSort] = useState<"asc" | "desc" | null>(null);
+  // Modal state for editing transaction
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [modalPartyName, setModalPartyName] = useState("");
+  const [modalVyaparRef, setModalVyaparRef] = useState("");
+  const [modalSuggestion, setModalSuggestion] = useState<string | null>(null);
 
   // Load transactions from Google Sheets (single source of truth - no local storage fallback)
   const loadTransactions = useCallback(async () => {
@@ -73,13 +100,13 @@ export function Transactions() {
         allTransactions = [];
       }
       
-      // Migrate legacy inVyapar to added_to_vyapar
-      allTransactions = allTransactions.map((t) => {
-        if (t.inVyapar !== undefined && t.added_to_vyapar === undefined) {
-          t.added_to_vyapar = t.inVyapar;
-        }
-        return t;
-      });
+    // Migrate legacy inVyapar to added_to_vyapar
+    allTransactions = allTransactions.map((t) => {
+      if (t.inVyapar !== undefined && t.added_to_vyapar === undefined) {
+        t.added_to_vyapar = t.inVyapar;
+      }
+      return t;
+    });
       
       // Deduplicate transactions by ID (in case Google Sheets returns duplicates)
       // Also handle cases where ID might be missing by using a composite key
@@ -115,26 +142,34 @@ export function Transactions() {
         console.log(`Removed ${allTransactions.length - uniqueTransactions.length} duplicate transactions`);
       }
       
-      // Only show deposits (credits)
+    // Only show deposits (credits)
       const creditTransactions = uniqueTransactions.filter((t) => t.type === "credit");
       
       // Replace transactions completely (don't append)
       // Use functional update to ensure we're replacing, not merging with previous state
-      setTransactions(() => {
-        // Return a completely new array to ensure React sees it as a change
-        return [...creditTransactions];
-      });
-      
-      // Sync input values with transactions (but don't overwrite focused input)
-      setInputValues((prev) => {
-        const newValues = { ...prev };
-        creditTransactions.forEach((t) => {
-          if (focusedInputId.current !== t.id && t.vyapar_reference_number) {
-            newValues[t.id] = t.vyapar_reference_number;
-          }
+      // BUT: Don't update if user is currently typing (to prevent focus loss)
+      if (focusedInputId.current === null) {
+        setTransactions(() => {
+          // Return a completely new array to ensure React sees it as a change
+          return [...creditTransactions];
         });
-        return newValues;
+    
+    // Sync input values with transactions (but don't overwrite focused input)
+    setInputValues((prev) => {
+      const newValues = { ...prev };
+      creditTransactions.forEach((t) => {
+        if (focusedInputId.current !== t.id && t.vyapar_reference_number) {
+          newValues[t.id] = t.vyapar_reference_number;
+        }
       });
+      return newValues;
+    });
+      } else {
+        // User is typing - skip transaction updates completely to prevent focus loss
+        // We'll update after the user finishes typing (on blur)
+        console.log('Skipping transaction update - user is typing in input');
+        return; // Don't update anything while user is typing
+      }
     } finally {
       setIsLoading(false);
       isLoadingRef.current = false;
@@ -142,30 +177,9 @@ export function Transactions() {
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
-    let intervalId: NodeJS.Timeout | null = null;
-    
-    const loadAndRefresh = async () => {
-      if (!isMounted) return;
-      await loadTransactions();
-    };
-    
-    // Initial load
-    loadAndRefresh();
-    
-    // Auto-refresh every 30 seconds (only if component is still mounted)
-    intervalId = setInterval(() => {
-      if (isMounted) {
-        loadAndRefresh();
-      }
-    }, 30000);
-    
-    return () => {
-      isMounted = false;
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
+    // Initial load only - no auto-refresh
+    // User must manually click refresh button to reload data
+    loadTransactions();
   }, [loadTransactions]);
 
   // Filter transactions based on view, date, and search
@@ -184,11 +198,12 @@ export function Transactions() {
         const storageRef = t.vyapar_reference_number ? String(t.vyapar_reference_number).trim() : '';
         const localRef = inputValues[t.id] ? String(inputValues[t.id]).trim() : '';
         const hasReference = Boolean(storageRef || localRef);
-        // Show if NOT completed (not both checked and has reference)
-        return !(isChecked && hasReference);
+        const hasPartyName = Boolean(t.partyName && t.partyName.trim() !== '');
+        // Show if NOT completed (not all: checked, has reference, AND has party name)
+        return !(isChecked && hasReference && hasPartyName);
       });
     } else if (view === "completed") {
-      // Completed: BOTH checkbox checked AND reference number entered (and not on hold)
+      // Completed: BOTH checkbox checked AND reference number entered AND party name entered (and not on hold)
       filtered = filtered.filter((t) => {
         const isHold = t.hold === true;
         if (isHold) return false; // Exclude hold transactions
@@ -196,11 +211,16 @@ export function Transactions() {
         const storageRef = t.vyapar_reference_number ? String(t.vyapar_reference_number).trim() : '';
         const localRef = inputValues[t.id] ? String(inputValues[t.id]).trim() : '';
         const hasReference = Boolean(storageRef || localRef);
-        return isChecked && hasReference;
+        const hasPartyName = Boolean(t.partyName && t.partyName.trim() !== '');
+        // Require ALL: checkbox checked, reference number, AND party name
+        return isChecked && hasReference && hasPartyName;
       });
     } else if (view === "hold") {
       // Hold: Transactions that are marked as hold
       filtered = filtered.filter((t) => t.hold === true);
+    } else if (view === "selfTransfer") {
+      // Self Transfer: Transactions that are marked as self transfer
+      filtered = filtered.filter((t) => t.selfTransfer === true);
     }
 
     // Apply date filter
@@ -229,14 +249,25 @@ export function Transactions() {
       );
     }
 
-    return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Apply date sorting if enabled, otherwise default to newest first
+    if (dateSort) {
+      filtered = [...filtered].sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return dateSort === "asc" ? dateA - dateB : dateB - dateA;
+      });
+    } else {
+      // Default: newest first
+      filtered = [...filtered].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+
+    return filtered;
     // Note: inputValues is accessed via closure but not in dependencies
     // This prevents re-renders while typing, but filter still works correctly
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, searchQuery, view, dateFrom, dateTo]);
+  }, [transactions, searchQuery, view, dateFrom, dateTo, dateSort]);
 
   // Pagination calculations
-  const itemsPerPage = 50;
   const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
@@ -253,6 +284,21 @@ export function Transactions() {
     paginatedTransactions.forEach(transaction => {
       // Skip if already loading or already checked
       if (partySuggestions[transaction.id] !== undefined || loadingSuggestionsRef.current.has(transaction.id)) {
+        return;
+      }
+
+      // Skip suggestions for completed transactions
+      const isAdded = transaction.added_to_vyapar || transaction.inVyapar;
+      const hasRef = Boolean(
+        (transaction.vyapar_reference_number ? String(transaction.vyapar_reference_number).trim() : '') ||
+        (inputValues[transaction.id] ? String(inputValues[transaction.id]).trim() : '')
+      );
+      const hasPartyName = Boolean(transaction.partyName && transaction.partyName.trim() !== '');
+      const isCompleted = isAdded && hasRef && hasPartyName;
+      
+      if (isCompleted) {
+        // Don't load suggestions for completed transactions
+        setPartySuggestions(prev => ({ ...prev, [transaction.id]: null }));
         return;
       }
 
@@ -374,7 +420,8 @@ export function Transactions() {
       (transaction?.vyapar_reference_number ? String(transaction.vyapar_reference_number).trim() : '') ||
       (inputValues[id] ? String(inputValues[id]).trim() : '')
     );
-    const isCompleted = checked && hasRef;
+    const hasPartyName = Boolean(transaction?.partyName && transaction.partyName.trim() !== '');
+    const isCompleted = checked && hasRef && hasPartyName;
     
     const updates: any = { added_to_vyapar: checked };
     
@@ -395,7 +442,7 @@ export function Transactions() {
         return newValues;
       });
     }
-    // Update transaction in local state immediately
+    // Update transaction in local state immediately - NEVER UPDATE DATE
     setTransactions((prev) =>
       prev.map((t) =>
         t.id === id
@@ -404,6 +451,7 @@ export function Transactions() {
               added_to_vyapar: checked,
               vyapar_reference_number: checked ? t.vyapar_reference_number : undefined,
               hold: isCompleted && t.hold ? false : t.hold,
+              date: t.date, // Explicitly preserve original date
             }
           : t
       )
@@ -448,7 +496,7 @@ export function Transactions() {
         // Clear focus tracking
         focusedInputId.current = null;
         
-        // Update local state
+        // Update local state - NEVER UPDATE DATE
         setTransactions((prev) =>
           prev.map((t) =>
             t.id === id
@@ -457,6 +505,7 @@ export function Transactions() {
                   added_to_vyapar: true,
                   vyapar_reference_number: finalValue.trim(),
                   hold: false, // Remove hold when completed
+                  date: t.date, // Explicitly preserve original date
                 }
               : t
           )
@@ -529,7 +578,7 @@ export function Transactions() {
       // Allow saving empty name (user can clear it)
       setTransactions((prev) =>
         prev.map((t) =>
-          t.id === transactionId ? { ...t, partyName: "" } : t
+          t.id === transactionId ? { ...t, partyName: "", date: t.date } : t
         )
       );
       // Update in background (already async inside)
@@ -542,13 +591,24 @@ export function Transactions() {
     if (newName === originalName) {
       return;
     }
+
+    // Update local state immediately with the NEW party name
+    // BUT: Don't update if user is currently typing in Vyapar ref input (to prevent focus loss)
+    if (focusedInputId.current !== transactionId) {
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === transactionId ? { ...t, partyName: newName, date: t.date } : t
+        )
+      );
+    }
     
-    // Update local state immediately
-    setTransactions((prev) =>
-      prev.map((t) =>
-        t.id === transactionId ? { ...t, partyName: newName } : t
-      )
-    );
+    // Create updated transaction object with the new party name for Google Sheets
+    // NEVER UPDATE DATE - preserve original date
+    const updatedTransactionForSheets = { 
+      ...transaction, 
+      partyName: newName,
+      date: transaction.date, // Explicitly preserve original date
+    };
 
     // Run learning operations in background (don't block UI)
     // AUTOMATIC TRAINING: System learns multiple patterns from narration automatically
@@ -559,7 +619,7 @@ export function Transactions() {
     // "FT - CR - 50200114785646 - SREE LAKSHMI GAYATRI HOSPITALS PVT LTD"
     // Note: transaction is already declared above on line 318
     (async () => {
-      if (transaction && transaction.description) {
+    if (transaction && transaction.description) {
       const desc = transaction.description.trim();
       const partyNameLower = newName.toLowerCase();
       const partyWords = partyNameLower.split(/\s+/).filter(w => w.length > 2);
@@ -714,23 +774,24 @@ export function Transactions() {
         }
       }
       
-        console.log(`🤖 Auto-trained ${learnedPatterns.length} patterns for "${newName}" from narration`);
-      }
+      console.log(`🤖 Auto-trained ${learnedPatterns.length} patterns for "${newName}" from narration`);
+    }
 
-      // Also learn from original name if it exists (for corrections)
-      if (originalName && originalName.trim() !== "" && originalName !== newName) {
+    // Also learn from original name if it exists (for corrections)
+    if (originalName && originalName.trim() !== "" && originalName !== newName) {
         await PartyMappingService.learnMapping(originalName, newName).catch(err => {
           console.error('Error learning mapping:', err);
         });
-      }
+    }
 
       // Update transaction in Google Sheets (background - already async inside)
-      StorageService.updateTransaction(transactionId, {
-        partyName: newName,
-      }, transaction);
+      // IMPORTANT: Pass the updated transaction with the new party name to ensure correct save
+    StorageService.updateTransaction(transactionId, {
+      partyName: newName,
+      }, updatedTransactionForSheets);
 
-      // Also manually trigger training from narration for this transaction
-      if (transaction && transaction.description) {
+    // Also manually trigger training from narration for this transaction
+    if (transaction && transaction.description) {
         await PartyMappingService.autoTrainFromNarration(transaction.description, newName).catch(err => {
           console.error('Error training from narration:', err);
         });
@@ -791,7 +852,7 @@ export function Transactions() {
       if (transaction) {
         StorageService.updateTransaction(transactionId, { hold: true }, transaction);
         setTransactions((prev) =>
-          prev.map((t) => (t.id === transactionId ? { ...t, hold: true } : t))
+          prev.map((t) => (t.id === transactionId ? { ...t, hold: true, date: t.date } : t))
         );
         // Switch to hold view
         setView("hold");
@@ -806,7 +867,35 @@ export function Transactions() {
     
     StorageService.updateTransaction(transactionId, { hold: false }, transaction);
     setTransactions((prev) =>
-      prev.map((t) => (t.id === transactionId ? { ...t, hold: false } : t))
+      prev.map((t) => (t.id === transactionId ? { ...t, hold: false, date: t.date } : t))
+    );
+  };
+
+  // Handle Set Self Transfer
+  const handleSetSelfTransfer = (transactionId: string) => {
+    const confirmed = window.confirm("Move this transaction to Self Transfer?");
+    
+    if (confirmed) {
+      const transaction = transactions.find((t) => t.id === transactionId);
+      if (transaction) {
+        StorageService.updateTransaction(transactionId, { selfTransfer: true }, transaction);
+        setTransactions((prev) =>
+          prev.map((t) => (t.id === transactionId ? { ...t, selfTransfer: true, date: t.date } : t))
+        );
+        // Switch to self transfer view
+        setView("selfTransfer");
+      }
+    }
+  };
+
+  // Handle Unset Self Transfer
+  const handleUnsetSelfTransfer = (transactionId: string) => {
+    const transaction = transactions.find((t) => t.id === transactionId);
+    if (!transaction) return;
+    
+    StorageService.updateTransaction(transactionId, { selfTransfer: false }, transaction);
+    setTransactions((prev) =>
+      prev.map((t) => (t.id === transactionId ? { ...t, selfTransfer: false, date: t.date } : t))
     );
   };
 
@@ -832,23 +921,229 @@ export function Transactions() {
       });
     }
 
-    // Update local state
+    // Update local state - NEVER UPDATE DATE
     setTransactions((prev) =>
       prev.map((t) =>
-        t.id === transactionId ? { ...t, partyName: suggestedName } : t
+        t.id === transactionId ? { ...t, partyName: suggestedName, date: t.date } : t
       )
     );
   };
 
+  // Handle opening edit modal for pending transactions
+  const handleOpenEditModal = async (transaction: Transaction) => {
+    setEditingTransaction(transaction);
+    setModalPartyName(transaction.partyName || "");
+    setModalVyaparRef(transaction.vyapar_reference_number || "");
+    setModalSuggestion(null); // Reset suggestion
+    
+    // Load suggestion for this transaction
+    if (transaction.description) {
+      const desc = transaction.description.trim();
+      
+      // Try to extract party name from description using various patterns
+      const patterns = [
+        /(?:NEFT|IMPS|RTGS|UPI|FT)\s*(?:CR|DR)?[\s\-]+[A-Z0-9]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z]{4,}|[A-Z]{2}\d{10,}|\d{10,})/i,
+        /(?:NEFT|IMPS|RTGS|UPI|FT|CHQ)\s*(?:CR|DR)?[\s\-]+\d+[\s\-]+([A-Z][A-Z\s\w]+?)(?:\s*-\s*\d+|\s*$)/i,
+        /(?:UPI|NEFT|IMPS)[\s\-]+[\d\-@]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z0-9@]+|\d+)/i,
+      ];
+      
+      let extractedName = "";
+      for (const pattern of patterns) {
+        const match = desc.match(pattern);
+        if (match && match[1]) {
+          extractedName = match[1].trim();
+          break;
+        }
+      }
+      
+      // If we extracted a name, try to get suggestion for it
+      if (extractedName) {
+        const suggested = await PartyMappingService.getSuggestedName(extractedName);
+        if (suggested) {
+          setModalSuggestion(suggested);
+        }
+      }
+      
+      // If no suggestion yet, try to get suggestion from the description itself
+      if (!modalSuggestion) {
+        // Try getting suggestion from cleaned description parts
+        const parts = desc
+          .split(/[\s\-:]+/)
+          .filter(p => p.length > 3)
+          .filter(p => !/^\d+$/.test(p))
+          .filter(p => !/^[A-Z]{2,4}\d+$/.test(p))
+          .filter(p => !/^\d{10,}$/.test(p))
+          .slice(0, 5); // Take first 5 meaningful parts
+        
+        for (const part of parts) {
+          const suggested = await PartyMappingService.getSuggestedName(part);
+          if (suggested) {
+            setModalSuggestion(suggested);
+            break;
+          }
+        }
+      }
+    }
+  };
+
+  // Handle closing edit modal
+  const handleCloseEditModal = () => {
+    setEditingTransaction(null);
+    setModalPartyName("");
+    setModalVyaparRef("");
+    setModalSuggestion(null);
+  };
+
+  // Handle submitting transaction from modal (move to completed)
+  const handleSubmitTransaction = async () => {
+    if (!editingTransaction) return;
+    
+    const partyName = modalPartyName.trim();
+    const vyaparRef = modalVyaparRef.trim();
+    
+    if (!partyName || !vyaparRef) {
+      alert("Please enter both Party Name and Vyapar Reference Number");
+      return;
+    }
+    
+    // Update transaction with party name and Vyapar ref
+    // NEVER UPDATE DATE - preserve original date
+    const updatedTransaction = {
+      ...editingTransaction,
+      partyName,
+      vyapar_reference_number: vyaparRef,
+      added_to_vyapar: true,
+      hold: false, // Remove hold if it was on hold
+      date: editingTransaction.date, // Explicitly preserve original date
+    };
+    
+    // Save to Google Sheets
+    StorageService.updateTransaction(editingTransaction.id, {
+      partyName,
+      vyapar_reference_number: vyaparRef,
+      added_to_vyapar: true,
+      hold: false,
+    }, updatedTransaction);
+    
+    // Learn from narration
+    if (editingTransaction.description) {
+      PartyMappingService.autoTrainFromNarration(editingTransaction.description, partyName).catch(err => {
+        console.error('Error training party mapping:', err);
+      });
+    }
+
+    // Update local state
+    setTransactions((prev) =>
+      prev.map((t) =>
+        t.id === editingTransaction.id ? updatedTransaction : t
+      )
+    );
+    
+    // Close modal
+    handleCloseEditModal();
+    
+    alert("Transaction moved to completed!");
+  };
+
+  // Handle moving transaction to hold from modal
+  const handleMoveToHold = async () => {
+    if (!editingTransaction) return;
+    
+    // Update transaction to hold status
+    // NEVER UPDATE DATE - preserve original date
+    const updatedTransaction = {
+      ...editingTransaction,
+      hold: true,
+      // Don't require party name or vyapar ref for hold
+      partyName: modalPartyName.trim() || editingTransaction.partyName || undefined,
+      vyapar_reference_number: modalVyaparRef.trim() || editingTransaction.vyapar_reference_number || undefined,
+      date: editingTransaction.date, // Explicitly preserve original date
+    };
+    
+    // Save to Google Sheets
+    StorageService.updateTransaction(editingTransaction.id, {
+      hold: true,
+      partyName: updatedTransaction.partyName,
+      vyapar_reference_number: updatedTransaction.vyapar_reference_number,
+    }, updatedTransaction);
+    
+    // Learn from narration if party name was provided
+    if (editingTransaction.description && modalPartyName.trim()) {
+      PartyMappingService.autoTrainFromNarration(editingTransaction.description, modalPartyName.trim()).catch(err => {
+        console.error('Error training party mapping:', err);
+      });
+    }
+
+    // Update local state
+    setTransactions((prev) =>
+      prev.map((t) =>
+        t.id === editingTransaction.id ? updatedTransaction : t
+      )
+    );
+    
+    // Close modal
+    handleCloseEditModal();
+    
+    alert("Transaction moved to hold!");
+  };
+
+  // Handle moving transaction to self transfer from modal
+  const handleMoveToSelfTransfer = async () => {
+    if (!editingTransaction) return;
+    
+    // Update transaction to self transfer status
+    // NEVER UPDATE DATE - preserve original date
+    const updatedTransaction = {
+      ...editingTransaction,
+      selfTransfer: true,
+      // Don't require party name or vyapar ref for self transfer
+      partyName: modalPartyName.trim() || editingTransaction.partyName || undefined,
+      vyapar_reference_number: modalVyaparRef.trim() || editingTransaction.vyapar_reference_number || undefined,
+      date: editingTransaction.date, // Explicitly preserve original date
+    };
+    
+    // Save to Google Sheets
+    StorageService.updateTransaction(editingTransaction.id, {
+      selfTransfer: true,
+      partyName: updatedTransaction.partyName,
+      vyapar_reference_number: updatedTransaction.vyapar_reference_number,
+    }, updatedTransaction);
+    
+    // Learn from narration if party name was provided
+    if (editingTransaction.description && modalPartyName.trim()) {
+      PartyMappingService.autoTrainFromNarration(editingTransaction.description, modalPartyName.trim()).catch(err => {
+        console.error('Error training party mapping:', err);
+      });
+    }
+
+    // Update local state
+    setTransactions((prev) =>
+      prev.map((t) =>
+        t.id === editingTransaction.id ? updatedTransaction : t
+      )
+    );
+    
+    // Close modal
+    handleCloseEditModal();
+    
+    alert("Transaction moved to self transfer!");
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Transactions</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage deposit transactions and track Vyapar entries ({filteredTransactions.length} found)
+          <h1 className="text-4xl font-display font-bold text-gradient">
+            Transactions
+          </h1>
+          <p className="text-muted-foreground mt-2">
+            Manage deposit transactions and track Vyapar entries
+            <span className="ml-2 px-2 py-1 bg-secondary text-secondary-foreground rounded-full text-sm font-medium">
+              {filteredTransactions.length} found
+            </span>
             {isGoogleSheetsConfigured() && lastSyncTime && (
-              <span className="ml-2 text-xs">
+              <span className="ml-3 text-sm text-slate-500">
                 • Last synced: {lastSyncTime.toLocaleTimeString()}
               </span>
             )}
@@ -859,85 +1154,290 @@ export function Transactions() {
             variant="outline"
             onClick={loadTransactions}
             disabled={isLoading}
-            className="flex items-center gap-2"
+            className="flex items-center gap-2 border-slate-300 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 shadow-sm"
           >
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            {isLoading ? 'Loading...' : 'Refresh from Sheets'}
+            {isLoading ? 'Loading...' : 'Refresh'}
           </Button>
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2 border-b">
+      {/* Tabs - Minimal & Clean */}
+      <div className="flex gap-2 border-b border-border/60 bg-card/50 rounded-t-lg p-1">
         <button
           onClick={() => setView("pending")}
           className={cn(
-            "px-4 py-2 font-medium border-b-2 transition-colors",
+            "px-6 py-3 font-semibold rounded-lg transition-all duration-200 relative",
             view === "pending"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
           )}
         >
-          Pending Transactions
+          Pending
+          {view === "pending" && filteredTransactions.length > 0 && (
+            <span className="ml-2 px-2 py-0.5 bg-primary-foreground/20 rounded-full text-xs font-bold">
+              {filteredTransactions.length}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setView("completed")}
           className={cn(
-            "px-4 py-2 font-medium border-b-2 transition-colors",
+            "px-6 py-3 font-semibold rounded-lg transition-all duration-200",
             view === "completed"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
           )}
         >
-          Completed Transactions
+          Completed
         </button>
         <button
           onClick={() => setView("hold")}
           className={cn(
-            "px-4 py-2 font-medium border-b-2 transition-colors",
+            "px-6 py-3 font-semibold rounded-lg transition-all duration-200",
             view === "hold"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
           )}
         >
-          Hold Transactions
+          Hold
+        </button>
+        <button
+          onClick={() => setView("selfTransfer")}
+          className={cn(
+            "px-6 py-3 font-semibold rounded-lg transition-all duration-200",
+            view === "selfTransfer"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          )}
+        >
+          Self Transfer
         </button>
       </div>
 
+      {view === "pending" ? (
+        // Minimal & Clean Pending Transactions UI
+        <div className="space-y-4 animate-fade-in">
+          {/* Stats & Search Bar */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Stats Cards - Compact */}
+            <div className="lg:col-span-2 grid grid-cols-2 gap-3">
+              <Card className="glass-card border border-border/60 animate-scale-in">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Pending Count</p>
+                      <p className="text-2xl font-bold text-foreground">
+                        {filteredTransactions.length}
+                      </p>
+                    </div>
+                    <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
+                      <AlertCircle className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="glass-card border border-border/60 animate-scale-in" style={{ animationDelay: '50ms' }}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Total Amount</p>
+                      <p className="text-2xl font-bold text-foreground">
+                        ₹{filteredTransactions.reduce((sum, t) => sum + t.amount, 0).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
+                      <span className="text-xl font-bold text-muted-foreground">₹</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Search & Sort - Compact */}
+            <Card className="glass-card border border-border/60">
+              <CardContent className="p-3 space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 h-9 text-sm"
+                  />
+                </div>
+                <div className="flex gap-1.5">
+                  <Button
+                    type="button"
+                    variant={dateSort === "desc" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDateSort(dateSort === "desc" ? null : "desc")}
+                    className="flex-1 h-8 text-xs"
+                  >
+                    <ArrowDown className="h-3 w-3 mr-1" />
+                    Newest
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={dateSort === "asc" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDateSort(dateSort === "asc" ? null : "asc")}
+                    className="flex-1 h-8 text-xs"
+                  >
+                    <ArrowUp className="h-3 w-3 mr-1" />
+                    Oldest
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Date Range Filter - Compact */}
+          <Card className="glass-card border border-border/60">
+            <CardContent className="p-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 min-w-[160px]">
+                  <Label htmlFor="dateFrom" className="text-xs font-semibold mb-1.5 block">From Date (DD/MM/YYYY)</Label>
+                  <DatePicker
+                    id="dateFrom"
+                    value={dateFrom}
+                    onChange={(value) => {
+                      if (view === "pending") setDateFromPending(value);
+                      else if (view === "completed") setDateFromCompleted(value);
+                      else if (view === "hold") setDateFromHold(value);
+                      else setDateFromSelfTransfer(value);
+                    }}
+                    placeholder="DD/MM/YYYY"
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <div className="flex-1 min-w-[160px]">
+                  <Label htmlFor="dateTo" className="text-xs font-semibold mb-1.5 block">To Date (DD/MM/YYYY)</Label>
+                  <DatePicker
+                    id="dateTo"
+                    value={dateTo}
+                    onChange={(value) => {
+                      if (view === "pending") setDateToPending(value);
+                      else if (view === "completed") setDateToCompleted(value);
+                      else if (view === "hold") setDateToHold(value);
+                      else setDateToSelfTransfer(value);
+                    }}
+                    placeholder="DD/MM/YYYY"
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (view === "pending") {
+                      setDateFromPending("");
+                      setDateToPending("");
+                    } else if (view === "completed") {
+                      setDateFromCompleted("");
+                      setDateToCompleted("");
+                    } else if (view === "hold") {
+                      setDateFromHold("");
+                      setDateToHold("");
+                    } else {
+                      setDateFromSelfTransfer("");
+                      setDateToSelfTransfer("");
+                    }
+                    setDateSort(null);
+                  }}
+                  className="h-9"
+                >
+                  Clear
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        // Filters for Completed and Hold Transactions
       <Card>
         <CardHeader>
           <CardTitle>Filters</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Date Range Filters */}
-          <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
             <div>
-              <Label htmlFor="dateFrom">From Date</Label>
-              <Input
-                id="dateFrom"
-                type="date"
+                <Label htmlFor="dateFromCompleted">From Date (DD/MM/YYYY)</Label>
+              <DatePicker
+                id="dateFromCompleted"
                 value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
+                onChange={(value) => {
+                  if (view === "pending") setDateFromPending(value);
+                  else if (view === "completed") setDateFromCompleted(value);
+                  else if (view === "hold") setDateFromHold(value);
+                  else setDateFromSelfTransfer(value);
+                }}
+                placeholder="DD/MM/YYYY"
+                className="h-9 text-sm"
               />
             </div>
             <div>
-              <Label htmlFor="dateTo">To Date</Label>
-              <Input
-                id="dateTo"
-                type="date"
+                <Label htmlFor="dateToCompleted">To Date (DD/MM/YYYY)</Label>
+              <DatePicker
+                id="dateToCompleted"
                 value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
+                onChange={(value) => {
+                  if (view === "pending") setDateToPending(value);
+                  else if (view === "completed") setDateToCompleted(value);
+                  else if (view === "hold") setDateToHold(value);
+                  else setDateToSelfTransfer(value);
+                }}
+                placeholder="DD/MM/YYYY"
+                className="h-9 text-sm"
               />
+            </div>
+              <div>
+                <Label>Sort by Date</Label>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant={dateSort === "asc" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDateSort(dateSort === "asc" ? null : "asc")}
+                    className="flex-1"
+                  >
+                    <ArrowUp className="h-4 w-4 mr-1" />
+                    Oldest
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={dateSort === "desc" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDateSort(dateSort === "desc" ? null : "desc")}
+                    className="flex-1"
+                  >
+                    <ArrowDown className="h-4 w-4 mr-1" />
+                    Newest
+                  </Button>
+                </div>
             </div>
             <div className="flex items-end">
               <Button
                 variant="outline"
                 onClick={() => {
-                  setDateFrom("");
-                  setDateTo("");
+                  if (view === "pending") {
+                    setDateFromPending("");
+                    setDateToPending("");
+                  } else if (view === "completed") {
+                    setDateFromCompleted("");
+                    setDateToCompleted("");
+                  } else if (view === "hold") {
+                    setDateFromHold("");
+                    setDateToHold("");
+                  } else {
+                    setDateFromSelfTransfer("");
+                    setDateToSelfTransfer("");
+                  }
+                  setDateSort(null);
                 }}
               >
-                Clear Dates
+                  Clear All
               </Button>
             </div>
           </div>
@@ -949,75 +1449,264 @@ export function Transactions() {
               placeholder="Search transactions..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="pl-10 border-2 border-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
           </div>
         </CardContent>
       </Card>
+      )}
 
-      <Card>
+      {view === "pending" ? (
+        // NEW: Modern Card-Based Transaction List
+        <div className="space-y-4">
+          {filteredTransactions.length === 0 ? (
+            <Card className="border-dashed">
+              <CardContent className="p-16 text-center">
+                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+                  <AlertCircle className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <p className="text-lg font-semibold mb-2">No pending transactions</p>
+                <p className="text-sm text-muted-foreground">Upload transactions or adjust your filters</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              {/* Clean Table Grid */}
+              <Card className="border-slate-200 shadow-sm">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full">
+                    <table className="w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
-                  <th className="p-3 text-left text-sm font-medium">Added to Vyapar</th>
-                  <th className="p-3 text-left text-sm font-medium">Date</th>
-                  <th className="p-3 text-left text-sm font-medium">Narration</th>
-                  <th className="p-3 text-left text-sm font-medium">Bank Ref No.</th>
-                  <th className="p-3 text-left text-sm font-medium">Amount</th>
-                  <th className="p-3 text-left text-sm font-medium">Party</th>
-                  <th className="p-3 text-left text-sm font-medium">Vyapar Ref No.</th>
-                  <th className="p-3 text-left text-sm font-medium">Actions</th>
+                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Date</th>
+                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Narration</th>
+                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Bank Ref No.</th>
+                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Amount</th>
+                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedTransactions.map((transaction) => (
+                          <tr
+                            key={transaction.id}
+                            className="border-b border-slate-300 bg-card hover:bg-muted/50 transition-colors"
+                          >
+                            <td className="p-3 text-sm border-r border-slate-300">{formatDate(transaction.date)}</td>
+                            <td className="p-3 text-sm border-r border-slate-300">{transaction.description}</td>
+                            <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
+                              {transaction.referenceNumber || "-"}
+                            </td>
+                            <td className="p-3 text-sm font-semibold text-foreground border-r border-slate-300">
+                              ₹{transaction.amount.toLocaleString()}
+                            </td>
+                            <td className="p-3">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditModal(transaction)}
+                                className="p-2 hover:bg-primary/10 rounded-md transition-colors"
+                                title="Edit transaction"
+                              >
+                                <Pencil className="h-4 w-4 text-primary" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Pagination - Always show */}
+              <Card className="border-slate-200 shadow-sm">
+                <CardContent className="p-4">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="text-sm text-muted-foreground font-medium">
+                        Page <span className="font-bold text-foreground">{currentPage}</span> of{" "}
+                        <span className="font-bold text-foreground">{totalPages}</span> •{" "}
+                        <span className="font-bold text-primary">{filteredTransactions.length}</span> total transactions
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor="itemsPerPage" className="text-sm font-medium">Show:</Label>
+                        <select
+                          id="itemsPerPage"
+                          value={itemsPerPage}
+                          onChange={(e) => {
+                            setItemsPerPage(Number(e.target.value));
+                            setCurrentPage(1);
+                          }}
+                          className="flex h-9 w-20 rounded-md border-2 border-slate-400 bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary focus-visible:ring-offset-2"
+                        >
+                          <option value={10}>10</option>
+                          <option value={25}>25</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                          disabled={currentPage === 1}
+                          className="border-slate-300 hover:bg-primary/5 hover:border-primary/40"
+                        >
+                          Previous
+                        </Button>
+                        <div className="flex items-center gap-1">
+                          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                            let pageNum: number;
+                            if (totalPages <= 5) {
+                              pageNum = i + 1;
+                            } else if (currentPage <= 3) {
+                              pageNum = i + 1;
+                            } else if (currentPage >= totalPages - 2) {
+                              pageNum = totalPages - 4 + i;
+                            } else {
+                              pageNum = currentPage - 2 + i;
+                            }
+                            return (
+                              <Button
+                                key={pageNum}
+                                variant={currentPage === pageNum ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => setCurrentPage(pageNum)}
+                                className={cn("min-w-[40px]", currentPage === pageNum ? "btn-gradient" : "border-slate-300 hover:bg-primary/5 hover:border-primary/40")}
+                              >
+                                {pageNum}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                          disabled={currentPage === totalPages}
+                          className="border-slate-300 hover:bg-primary/5 hover:border-primary/40"
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+            </>
+          )}
+        </div>
+      ) : (
+        // Table layout for completed and hold transactions - matching pending style
+        <>
+      <Card className="border-slate-200 shadow-sm">
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Added to Vyapar</th>
+                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
+                      <div className="flex items-center gap-2">
+                        <span>Date</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (dateSort === "asc") {
+                              setDateSort("desc");
+                            } else if (dateSort === "desc") {
+                              setDateSort(null);
+                            } else {
+                              setDateSort("asc");
+                            }
+                          }}
+                          className="p-1 hover:bg-accent rounded"
+                          title="Sort by date"
+                        >
+                          {dateSort === "asc" ? (
+                            <ArrowUp className="h-4 w-4" />
+                          ) : dateSort === "desc" ? (
+                            <ArrowDown className="h-4 w-4" />
+                          ) : (
+                            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </button>
+                      </div>
+                    </th>
+                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Narration</th>
+                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Bank Ref No.</th>
+                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Amount</th>
+                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Party</th>
+                  {(view !== "hold" && view !== "selfTransfer") && (
+                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Vyapar Ref No.</th>
+                  )}
+                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={view === "hold" || view === "selfTransfer" ? 7 : 8} className="p-8 text-center text-muted-foreground border-b border-slate-300">
                       No transactions found
                     </td>
                   </tr>
                 ) : (
-                  paginatedTransactions.map((transaction) => {
-                    // Suggestions are now loaded via useEffect when page/transactions change
-                    // This prevents blocking the render with async calls
-                    
+                    paginatedTransactions.map((transaction) => {
                     const isAdded = transaction.added_to_vyapar || transaction.inVyapar;
-                    // Check both storage and local input values
-                    const storageRef = transaction.vyapar_reference_number ? String(transaction.vyapar_reference_number).trim() : '';
-                    const localRef = inputValues[transaction.id] ? String(inputValues[transaction.id]).trim() : '';
+                      const storageRef = transaction.vyapar_reference_number ? String(transaction.vyapar_reference_number).trim() : '';
+                      const localRef = inputValues[transaction.id] ? String(inputValues[transaction.id]).trim() : '';
                     const hasReference = Boolean(storageRef || localRef);
                     const showIcons = isAdded && hasReference;
 
+                    // For completed and hold transactions, show full view (unchanged)
                     return (
                       <tr
                         key={transaction.id}
                         className={cn(
-                          "border-t transition-colors group",
+                          "border-b border-slate-300 bg-card hover:bg-muted/50 transition-colors group",
                           transaction.hold && "bg-yellow-50",
-                          !transaction.hold && isAdded && "bg-green-50"
+                          transaction.selfTransfer && "bg-purple-50",
+                          !transaction.hold && !transaction.selfTransfer && isAdded && "bg-green-50"
                         )}
                       >
-                        <td className="p-3">
+                        <td className="p-3 border-r border-slate-300">
                           <Checkbox
                             checked={isAdded}
                             onChange={(e) => handleToggleVyapar(transaction.id, e.target.checked)}
-                            disabled={transaction.hold === true}
-                            title={transaction.hold ? "Cannot modify - transaction is on hold" : ""}
+                            disabled={transaction.hold === true || transaction.selfTransfer === true}
+                            title={transaction.hold ? "Cannot modify - transaction is on hold" : transaction.selfTransfer ? "Cannot modify - transaction is a self transfer" : ""}
                           />
                         </td>
-                        <td className="p-3 text-sm">{formatDate(transaction.date)}</td>
-                        <td className="p-3 text-sm">{transaction.description}</td>
-                        <td className="p-3 text-sm text-muted-foreground">
+                        <td className="p-3 text-sm border-r border-slate-300">{formatDate(transaction.date)}</td>
+                        <td className="p-3 text-sm border-r border-slate-300">{transaction.description}</td>
+                        <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
                           {transaction.referenceNumber || "-"}
                         </td>
-                        <td className="p-3 text-sm font-semibold text-green-600">
+                        <td className="p-3 text-sm font-semibold text-green-600 border-r border-slate-300">
                           ₹{transaction.amount.toLocaleString()}
                         </td>
-                        <td className="p-3 text-sm text-muted-foreground">
+                        <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
                           <div className="flex items-center gap-2">
-                            {editingPartyName === transaction.id ? (
+                            {(() => {
+                              // Check if transaction is completed
+                              const isAdded = transaction.added_to_vyapar || transaction.inVyapar;
+                              const hasRef = Boolean(
+                                (transaction.vyapar_reference_number ? String(transaction.vyapar_reference_number).trim() : '') ||
+                                (inputValues[transaction.id] ? String(inputValues[transaction.id]).trim() : '')
+                              );
+                              const hasPartyName = Boolean(transaction.partyName && transaction.partyName.trim() !== '');
+                              const isCompleted = isAdded && hasRef && hasPartyName;
+
+                              // For completed transactions, just show the party name (no editing, no suggestions)
+                              if (isCompleted) {
+                                return (
+                                  <span className="text-sm">{transaction.partyName || "-"}</span>
+                                );
+                              }
+
+                              // For non-completed transactions, allow editing and show suggestions
+                              if (editingPartyName === transaction.id) {
+                                return (
                               <div className="flex items-center gap-1">
                                 <Input
                                   value={editingPartyValue}
@@ -1029,7 +1718,7 @@ export function Transactions() {
                                       handleCancelPartyNameEdit();
                                     }
                                   }}
-                                  className="w-40 h-7 text-xs"
+                                  className="w-40 h-7 text-xs border-2 border-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
                                   placeholder="Enter party name"
                                   autoFocus
                                 />
@@ -1050,13 +1739,16 @@ export function Transactions() {
                                   <XCircle className="h-3 w-3 text-red-600" />
                                 </button>
                               </div>
-                            ) : (
+                                );
+                              }
+
+                              return (
                               <div className="flex items-center gap-2 group/party">
                                 {transaction.partyName ? (
                                   <>
                                     <span>{transaction.partyName}</span>
                                     {(() => {
-                                      const suggested = partySuggestions[transaction.id] || null;
+                                        const suggested = partySuggestions[transaction.id] || null;
                                       if (suggested && suggested !== transaction.partyName) {
                                         return (
                                           <button
@@ -1083,51 +1775,74 @@ export function Transactions() {
                                     })()}
                                   </>
                                 ) : (
-                                  <div className="flex items-center gap-2">
-                                    {(() => {
-                                      const suggested = partySuggestions[transaction.id] || null;
-                                      if (suggested) {
+                                    <div className="flex items-center gap-2">
+                                      {(() => {
+                                        const suggested = partySuggestions[transaction.id] || null;
+                                        if (suggested) {
+                                          return (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleApplySuggestion(transaction.id, "", suggested)}
+                                              className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                                              title={`Suggested: ${suggested}`}
+                                            >
+                                              <Sparkles className="h-3 w-3" />
+                                              {suggested}
+                                            </button>
+                                          );
+                                        }
                                         return (
-                                          <button
-                                            type="button"
-                                            onClick={() => handleApplySuggestion(transaction.id, "", suggested)}
-                                            className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-                                            title={`Suggested: ${suggested}`}
-                                          >
-                                            <Sparkles className="h-3 w-3" />
-                                            {suggested}
-                                          </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditPartyName(transaction.id, "")}
+                                    className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground border border-dashed rounded hover:bg-gray-50 transition-colors"
+                                    title="Click to add party name"
+                                  >
+                                    <Edit2 className="h-3 w-3" />
+                                    Add party name
+                                  </button>
                                         );
-                                      }
-                                      return (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleStartEditPartyName(transaction.id, "")}
-                                          className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground border border-dashed rounded hover:bg-gray-50 transition-colors"
-                                          title="Click to add party name"
-                                        >
-                                          <Edit2 className="h-3 w-3" />
-                                          Add party name
-                                        </button>
-                                      );
-                                    })()}
-                                  </div>
-                                )}
+                                      })()}
                               </div>
                             )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </td>
-                        <td className="p-3">
-                          <div className="flex items-center gap-2">
+                        {(view !== "hold" && view !== "selfTransfer") && (
+                          <td className="p-3 border-r border-slate-300">
+                            <div className="flex items-center gap-2">
+                              {(() => {
+                                // Check if transaction is completed
+                                const hasPartyName = Boolean(transaction.partyName && transaction.partyName.trim() !== '');
+                                const isCompleted = isAdded && hasReference && hasPartyName;
+
+                                // For completed transactions (but not self transfer), show read-only value
+                                // Self transfer transactions should always allow editing Vyapar ref
+                                if (isCompleted && !transaction.selfTransfer) {
+                                  return (
+                                    <span className="text-sm text-muted-foreground">
+                                      {transaction.vyapar_reference_number || "-"}
+                                    </span>
+                                  );
+                                }
+
+                                // For non-completed transactions, allow editing
+                                // Always allow editing the Vyapar reference number (even if checkbox not checked)
+                                return (
                             <Input
                               key={`input-${transaction.id}`}
                               value={inputValues[transaction.id] ?? transaction.vyapar_reference_number ?? ""}
                               onChange={(e) => {
                                 e.stopPropagation();
-                                handleReferenceChange(transaction.id, e.target.value);
+                                    // Don't prevent default - we need the input to work normally
+                                    const value = e.target.value;
+                                    handleReferenceChange(transaction.id, value);
                               }}
                               onFocus={(e) => {
                                 e.stopPropagation();
+                                    // Set focus tracking immediately - this prevents auto-refresh from interrupting
                                 focusedInputId.current = transaction.id;
                                 // Ensure we have the current value in local state
                                 if (!inputValues[transaction.id] && transaction.vyapar_reference_number) {
@@ -1136,55 +1851,77 @@ export function Transactions() {
                                     [transaction.id]: transaction.vyapar_reference_number || "",
                                   }));
                                 }
+                                    // Force focus to stay - prevent any re-renders from stealing focus
+                                    const inputElement = e.target as HTMLInputElement;
+                                    setTimeout(() => {
+                                      if (document.activeElement !== inputElement) {
+                                        inputElement.focus();
+                                      }
+                                    }, 10);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    // Prevent any key handlers from interfering
+                                    e.stopPropagation();
+                                  }}
+                                  onMouseDown={(e) => {
+                                    // Prevent any click handlers from interfering
+                                    e.stopPropagation();
+                                  }}
+                                  onClick={(e) => {
+                                    // Prevent any click handlers from interfering
+                                    e.stopPropagation();
                               }}
                               onBlur={(e) => {
                                 e.stopPropagation();
                                 // Save the final value when user leaves the input
                                 const finalValue = inputValues[transaction.id] ?? "";
-                                const isChecked = transaction.added_to_vyapar || transaction.inVyapar;
-                                const hasRef = finalValue.trim().length > 0;
-                                const isCompleted = isChecked && hasRef;
-                                
+                                    const isChecked = transaction.added_to_vyapar || transaction.inVyapar;
+                                    const hasRef = finalValue.trim().length > 0;
+                                    const hasPartyName = Boolean(transaction.partyName && transaction.partyName.trim() !== '');
+                                    const isCompleted = isChecked && hasRef && hasPartyName;
+                                    
                                 if (finalValue !== (transaction.vyapar_reference_number || "")) {
-                                  const updates: any = {
+                                      const updates: any = {
                                     vyapar_reference_number: finalValue || undefined,
-                                  };
-                                  
-                                  // If transaction becomes completed and was on hold, remove hold
-                                  if (isCompleted && transaction.hold) {
-                                    updates.hold = false;
-                                  }
-                                  
-                                  StorageService.updateTransaction(transaction.id, updates, transaction);
-                                  
-                                  // Update transaction state after blur
+                                      };
+                                      
+                                      // If transaction becomes completed and was on hold, remove hold
+                                      if (isCompleted && transaction.hold) {
+                                        updates.hold = false;
+                                      }
+                                      
+                                      StorageService.updateTransaction(transaction.id, updates, transaction);
+                                      
+                                  // Update transaction state after blur - NEVER UPDATE DATE
                                   setTransactions((prev) =>
                                     prev.map((t) =>
                                       t.id === transaction.id
-                                        ? { 
-                                            ...t, 
-                                            vyapar_reference_number: finalValue || undefined,
-                                            hold: isCompleted && t.hold ? false : t.hold
-                                          }
+                                            ? { 
+                                                ...t, 
+                                                vyapar_reference_number: finalValue || undefined,
+                                                hold: isCompleted && t.hold ? false : t.hold,
+                                                date: t.date // Explicitly preserve original date
+                                              }
                                         : t
                                     )
                                   );
                                 }
-                                // Small delay to allow button clicks
+                                    // Clear focus tracking after a delay
                                 setTimeout(() => {
-                                  if (document.activeElement?.tagName !== "BUTTON") {
+                                      // Only clear if input is no longer focused
+                                      const activeElement = document.activeElement as HTMLInputElement;
+                                      if (activeElement?.tagName !== "INPUT" || 
+                                          activeElement?.id !== `input-${transaction.id}`) {
                                     focusedInputId.current = null;
                                   }
-                                }, 200);
-                              }}
-                              placeholder={isAdded ? "Enter Vyapar ref..." : "Check box to enable"}
-                              disabled={!isAdded}
-                              className={cn(
-                                "w-full max-w-xs transition-all",
-                                !isAdded && "bg-muted opacity-50 cursor-not-allowed",
-                                isAdded && "bg-white opacity-100"
-                              )}
-                            />
+                                    }, 300);
+                                  }}
+                                  placeholder="Enter Vyapar ref no."
+                                  className="w-full max-w-xs border-2 border-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                  id={`input-${transaction.id}`}
+                                />
+                              );
+                            })()}
                             {showIcons && (
                               <>
                                 <button
@@ -1217,6 +1954,7 @@ export function Transactions() {
                             )}
                           </div>
                         </td>
+                        )}
                         <td className="p-3">
                           <div className="flex items-center gap-2">
                             {transaction.hold ? (
@@ -1225,8 +1963,9 @@ export function Transactions() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleUnhold(transaction.id)}
-                                className="text-xs"
+                                className="text-xs bg-yellow-50 hover:bg-yellow-100"
                               >
+                                <XCircle className="h-3.5 w-3.5 mr-1.5" />
                                 Unhold
                               </Button>
                             ) : (
@@ -1237,7 +1976,30 @@ export function Transactions() {
                                 onClick={() => handleSetHold(transaction.id)}
                                 className="text-xs bg-yellow-50 hover:bg-yellow-100"
                               >
+                                <Clock className="h-3.5 w-3.5 mr-1.5" />
                                 Hold
+                              </Button>
+                            )}
+                            {transaction.selfTransfer ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleUnsetSelfTransfer(transaction.id)}
+                                className="text-xs bg-purple-50 hover:bg-purple-100"
+                              >
+                                <XCircle className="h-3.5 w-3.5 mr-1.5" />
+                                Remove Self Transfer
+                              </Button>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleSetSelfTransfer(transaction.id)}
+                                className="text-xs bg-purple-50 hover:bg-purple-100"
+                              >
+                                Self Transfer
                               </Button>
                             )}
                           </div>
@@ -1249,19 +2011,44 @@ export function Transactions() {
               </tbody>
             </table>
           </div>
-          
-          {/* Pagination Controls */}
-          {filteredTransactions.length > itemsPerPage && (
-            <div className="flex items-center justify-between p-4 border-t">
-              <div className="text-sm text-muted-foreground">
-                Showing {startIndex + 1} to {Math.min(endIndex, filteredTransactions.length)} of {filteredTransactions.length} transactions
+        </CardContent>
+      </Card>
+      
+      {/* Pagination Controls - matching pending style */}
+      <Card className="border-slate-200 shadow-sm">
+        <CardContent className="p-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="text-sm text-muted-foreground font-medium">
+                Page <span className="font-bold text-foreground">{currentPage}</span> of{" "}
+                <span className="font-bold text-foreground">{totalPages}</span> •{" "}
+                <span className="font-bold text-primary">{filteredTransactions.length}</span> total transactions
               </div>
               <div className="flex items-center gap-2">
+                <Label htmlFor="itemsPerPageCompleted" className="text-sm font-medium">Show:</Label>
+                <select
+                  id="itemsPerPageCompleted"
+                  value={itemsPerPage}
+                  onChange={(e) => {
+                    setItemsPerPage(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="flex h-9 w-20 rounded-md border-2 border-slate-400 bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary focus-visible:ring-offset-2"
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                   disabled={currentPage === 1}
+                  className="border-slate-300 hover:bg-primary/5 hover:border-primary/40"
                 >
                   Previous
                 </Button>
@@ -1283,7 +2070,7 @@ export function Transactions() {
                         variant={currentPage === pageNum ? "default" : "outline"}
                         size="sm"
                         onClick={() => setCurrentPage(pageNum)}
-                        className="min-w-[40px]"
+                        className={cn("min-w-[40px]", currentPage === pageNum ? "btn-gradient" : "border-slate-300 hover:bg-primary/5 hover:border-primary/40")}
                       >
                         {pageNum}
                       </Button>
@@ -1295,14 +2082,129 @@ export function Transactions() {
                   size="sm"
                   onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                   disabled={currentPage === totalPages}
+                  className="border-slate-300 hover:bg-primary/5 hover:border-primary/40"
                 >
                   Next
                 </Button>
               </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+        </>
+      )}
+
+      {/* Edit Transaction Modal */}
+      <Modal
+        isOpen={editingTransaction !== null}
+        onClose={handleCloseEditModal}
+        title="Add Transaction Details"
+      >
+        {editingTransaction && (
+          <div className="space-y-6">
+            {/* Transaction Details (Read-only) */}
+            <div className="space-y-4 p-5 bg-gradient-to-br from-slate-50 to-blue-50/30 rounded-xl border border-slate-200">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Date</Label>
+                  <p className="text-base font-bold text-slate-900">{formatDate(editingTransaction.date)}</p>
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Amount</Label>
+                  <p className="text-base font-bold text-green-600">
+                    ₹{editingTransaction.amount.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Narration</Label>
+                <p className="text-sm text-slate-700 leading-relaxed">{editingTransaction.description}</p>
+              </div>
+              {editingTransaction.referenceNumber && (
+                <div>
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Bank Ref No.</Label>
+                  <p className="text-sm font-mono bg-white px-3 py-2 rounded-lg border border-slate-200 text-slate-700">
+                    {editingTransaction.referenceNumber}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Party Name Input */}
+            <div className="space-y-2">
+              <Label htmlFor="modal-party-name" className="text-sm font-semibold">
+                Party Name <span className="text-muted-foreground text-xs">(Optional for Hold/Self Transfer)</span>
+              </Label>
+              <div className="flex items-center gap-3">
+                <Input
+                  id="modal-party-name"
+                  value={modalPartyName}
+                  onChange={(e) => setModalPartyName(e.target.value)}
+                  placeholder="Enter party name"
+                  className="flex-1 h-12 input-modern"
+                />
+                {modalSuggestion && modalSuggestion !== modalPartyName && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setModalPartyName(modalSuggestion)}
+                    className="flex-shrink-0"
+                    title={`Use suggested: ${modalSuggestion}`}
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Use: {modalSuggestion}
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Vyapar Reference Number Input */}
+            <div className="space-y-2">
+              <Label htmlFor="modal-vyapar-ref" className="text-sm font-semibold">
+                Vyapar Reference Number <span className="text-muted-foreground text-xs">(Optional for Hold/Self Transfer)</span>
+              </Label>
+              <Input
+                id="modal-vyapar-ref"
+                value={modalVyaparRef}
+                onChange={(e) => setModalVyaparRef(e.target.value)}
+                placeholder="Enter Vyapar reference number"
+                className="h-12 input-modern"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-between gap-3 pt-6 border-t border-border">
+              <Button 
+                variant="outline" 
+                onClick={handleCloseEditModal}
+              >
+                Cancel
+              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={handleMoveToHold}
+                  variant="outline"
+                  className="border-yellow-500 text-yellow-700 hover:bg-yellow-50"
+                >
+                  Move to Hold
+                </Button>
+                <Button 
+                  onClick={handleMoveToSelfTransfer}
+                  variant="outline"
+                  className="border-purple-500 text-purple-700 hover:bg-purple-50"
+                >
+                  Move to Self Transfer
+                </Button>
+                <Button 
+                  onClick={handleSubmitTransaction}
+                  className="btn-gradient"
+                >
+                  Submit & Move to Completed
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

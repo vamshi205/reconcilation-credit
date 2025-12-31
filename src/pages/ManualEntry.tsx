@@ -102,17 +102,19 @@ export function ManualEntry() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold">Manual Entry</h1>
-        <p className="text-muted-foreground mt-1">Add a new transaction manually</p>
+        <h1 className="text-4xl font-display font-bold text-gradient">
+          Manual Entry
+        </h1>
+        <p className="text-muted-foreground mt-2">Add a new transaction manually</p>
       </div>
 
-      <Card>
-        <CardHeader>
+      <Card className="glass-card border-2 border-border/60 animate-fade-in">
+        <CardHeader className="bg-muted/30 border-b border-border/60">
           <CardTitle>Transaction Details</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div>
@@ -121,6 +123,7 @@ export function ManualEntry() {
                   id="date"
                   type="date"
                   {...register("date", { required: "Date is required" })}
+                  className="input-modern"
                 />
                 {errors.date && (
                   <p className="text-sm text-destructive mt-1">{errors.date.message}</p>
@@ -146,6 +149,7 @@ export function ManualEntry() {
                     required: "Amount is required",
                     min: { value: 0.01, message: "Amount must be greater than 0" },
                   })}
+                  className="input-modern"
                 />
                 {errors.amount && (
                   <p className="text-sm text-destructive mt-1">{errors.amount.message}</p>
@@ -169,6 +173,7 @@ export function ManualEntry() {
                   id="description"
                   placeholder="Transaction description or narration"
                   {...register("description", { required: "Description is required" })}
+                  className="input-modern"
                 />
                 {errors.description && (
                   <p className="text-sm text-destructive mt-1">{errors.description.message}</p>
@@ -181,6 +186,7 @@ export function ManualEntry() {
                   id="partyName"
                   placeholder="Customer or supplier name"
                   {...register("partyName")}
+                  className="input-modern"
                 />
               </div>
 
@@ -190,6 +196,7 @@ export function ManualEntry() {
                   id="referenceNumber"
                   placeholder="Cheque no, UPI ref, etc."
                   {...register("referenceNumber")}
+                  className="input-modern"
                 />
               </div>
 
@@ -199,12 +206,13 @@ export function ManualEntry() {
                   id="notes"
                   placeholder="Additional notes (optional)"
                   {...register("notes")}
+                  className="input-modern"
                 />
               </div>
             </div>
 
             <div className="flex gap-4 pt-4">
-              <Button type="submit" disabled={isSubmitting}>
+              <Button type="submit" disabled={isSubmitting} className="btn-gradient">
                 <Save className="h-4 w-4 mr-2" />
                 {isSubmitting ? "Saving..." : "Save Transaction"}
               </Button>

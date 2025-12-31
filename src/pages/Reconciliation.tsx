@@ -72,8 +72,10 @@ export function Reconciliation() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Reconciliation</h1>
-        <p className="text-muted-foreground mt-1">Track which transactions are entered in Vyapar</p>
+        <h1 className="text-4xl font-display font-bold text-gradient">
+          Reconciliation
+        </h1>
+        <p className="text-muted-foreground mt-2">Track which transactions are entered in Vyapar</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">

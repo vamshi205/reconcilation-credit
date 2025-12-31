@@ -4,7 +4,7 @@ import { StorageService, DashboardStats } from "../services/storageService";
 import { fetchTransactionsFromSheets, isGoogleSheetsConfigured } from "../services/googleSheetsService";
 import { Transaction } from "../types/transaction";
 import { formatCurrency } from "../lib/utils";
-import { DollarSign, AlertCircle, CheckCircle, TrendingUp } from "lucide-react";
+import { AlertCircle, CheckCircle, TrendingUp } from "lucide-react";
 import { Input } from "../components/ui/Input";
 import { Label } from "../components/ui/Label";
 import { Button } from "../components/ui/Button";
@@ -23,8 +23,7 @@ export function Dashboard() {
     transactionsThisYear: 0,
   });
 
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
   const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   // Load transactions from Google Sheets
@@ -59,17 +58,12 @@ export function Dashboard() {
     const calculateStats = (): DashboardStats => {
       let filteredTransactions = [...transactions];
       
-      // Apply date filter if provided
-      if (dateFrom || dateTo) {
+      // Apply year filter if provided
+      if (selectedYear) {
+        const year = parseInt(selectedYear);
         filteredTransactions = filteredTransactions.filter((t) => {
           const tDate = new Date(t.date);
-          if (dateFrom && tDate < new Date(dateFrom)) return false;
-          if (dateTo) {
-            const toDate = new Date(dateTo);
-            toDate.setHours(23, 59, 59, 999);
-            if (tDate > toDate) return false;
-          }
-          return true;
+          return tDate.getFullYear() === year;
         });
       }
 
@@ -87,16 +81,29 @@ export function Dashboard() {
 
       const totalDepositAmount = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
 
-      // Pending: not added to vyapar AND not on hold (or on hold but no ref number)
+      // Pending: not completed (not all: checked, has ref, AND has party name) AND not on hold
       const pendingTransactions = filteredTransactions.filter(
-        (t) => !t.added_to_vyapar && !t.inVyapar && (!t.hold || !t.vyapar_reference_number)
+        (t) => {
+          const isHold = t.hold === true;
+          if (isHold) return false; // Exclude hold transactions
+          const isChecked = Boolean(t.added_to_vyapar || t.inVyapar);
+          const hasRef = Boolean(t.vyapar_reference_number && String(t.vyapar_reference_number).trim() !== '');
+          const hasPartyName = Boolean(t.partyName && t.partyName.trim() !== '');
+          const isCompleted = isChecked && hasRef && hasPartyName;
+          return !isCompleted;
+        }
       );
       const pendingAmount = pendingTransactions.reduce((sum, t) => sum + t.amount, 0);
       const pendingCount = pendingTransactions.length;
 
-      // Completed: added to vyapar AND has reference number (or was on hold but now completed)
+      // Completed: added to vyapar AND has reference number AND has party name
       const completedTransactions = filteredTransactions.filter(
-        (t) => (t.added_to_vyapar || t.inVyapar) && t.vyapar_reference_number && String(t.vyapar_reference_number).trim() !== ''
+        (t) => {
+          const isChecked = Boolean(t.added_to_vyapar || t.inVyapar);
+          const hasRef = Boolean(t.vyapar_reference_number && String(t.vyapar_reference_number).trim() !== '');
+          const hasPartyName = Boolean(t.partyName && t.partyName.trim() !== '');
+          return isChecked && hasRef && hasPartyName;
+        }
       );
       const completedAmount = completedTransactions.reduce((sum, t) => sum + t.amount, 0);
 
@@ -128,20 +135,19 @@ export function Dashboard() {
     };
 
     setStats(calculateStats());
-  }, [transactions, dateFrom, dateTo]);
+  }, [transactions, selectedYear]);
 
-  const handleClearFilters = () => {
-    setDateFrom("");
-    setDateTo("");
-  };
+  // Generate year options (current year and 5 years back)
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 6 }, (_, i) => (currentYear - i).toString());
 
   const kpiCards = [
     {
       title: "Total Deposit Amount",
       value: formatCurrency(stats.totalDepositAmount),
-      icon: DollarSign,
-      color: "text-blue-600",
-      bgColor: "bg-blue-50",
+      icon: TrendingUp,
+      color: "text-primary",
+      bgColor: "bg-primary/10",
     },
     {
       title: "Pending Amount",
@@ -168,40 +174,45 @@ export function Dashboard() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">Overview of deposit transactions and Vyapar sync status</p>
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-4xl font-display font-bold text-gradient">
+            Dashboard
+          </h1>
+          <p className="text-muted-foreground mt-2">Overview of deposit transactions and Vyapar sync status</p>
+        </div>
       </div>
 
-      {/* Date Filters */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Date Range Filter</CardTitle>
+      {/* Year Filter */}
+      <Card className="glass-card border-2 border-border/60 animate-fade-in">
+        <CardHeader className="bg-muted/30 border-b border-border/60">
+          <CardTitle>Year Filter</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            <div>
-              <Label htmlFor="dateFrom">From Date</Label>
-              <Input
-                id="dateFrom"
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="dateTo">To Date</Label>
-              <Input
-                id="dateTo"
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-4">
+            <div className="flex-1 max-w-xs">
+              <Label htmlFor="yearSelect" className="text-sm font-semibold mb-2 block">Select Year</Label>
+              <select
+                id="yearSelect"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                className="flex h-11 w-full rounded-md border-2 border-slate-400 bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+              >
+                {yearOptions.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="flex items-end">
-              <Button variant="outline" onClick={handleClearFilters}>
-                Clear Filters
+              <Button 
+                variant="outline" 
+                onClick={() => setSelectedYear(new Date().getFullYear().toString())}
+              >
+                Reset to Current Year
               </Button>
             </div>
           </div>
@@ -210,16 +221,22 @@ export function Dashboard() {
 
       {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {kpiCards.map((kpi) => (
-          <Card key={kpi.title}>
+        {kpiCards.map((kpi, index) => (
+          <Card 
+            key={kpi.title} 
+            className="glass-card border-2 border-border/60 hover:border-primary/40 transition-all duration-300 animate-scale-in overflow-hidden"
+            style={{ animationDelay: `${index * 50}ms` }}
+          >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">{kpi.title}</CardTitle>
-              <kpi.icon className={`h-4 w-4 ${kpi.color}`} />
+              <CardTitle className="text-sm font-semibold">{kpi.title}</CardTitle>
+              <div className="p-2 rounded-lg bg-primary/10">
+                <kpi.icon className={`h-5 w-5 ${kpi.color}`} />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{kpi.value}</div>
+              <div className="text-3xl font-bold">{kpi.value}</div>
               {kpi.subtitle && (
-                <p className="text-xs text-muted-foreground mt-1">{kpi.subtitle}</p>
+                <p className="text-xs text-muted-foreground mt-2 font-medium">{kpi.subtitle}</p>
               )}
             </CardContent>
           </Card>

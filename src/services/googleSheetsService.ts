@@ -309,6 +309,7 @@ function formatTransactionAsRow(transaction: Transaction): (string | number)[] {
     transaction.added_to_vyapar ? 'Yes' : 'No', // Added to Vyapar
     transaction.vyapar_reference_number || '', // Vyapar Ref No.
     transaction.hold ? 'Yes' : 'No', // Hold Status
+    transaction.selfTransfer ? 'Yes' : 'No', // Self Transfer Status
     transaction.notes || '', // Notes
     transaction.createdAt ? formatDate(transaction.createdAt) : '', // Created At
     transaction.updatedAt ? formatDate(transaction.updatedAt) : '', // Updated At
@@ -416,9 +417,10 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
           added_to_vyapar: row[8] === 'Yes' || row[8] === true || row[8] === 'true',
           vyapar_reference_number: vyaparRef,
           hold: row[10] === 'Yes' || row[10] === true || row[10] === 'true',
+          selfTransfer: row[11] === 'Yes' || row[11] === true || row[11] === 'true',
           notes: notesValue,
-          createdAt: row[12] || new Date().toISOString(),
-          updatedAt: row[13] || new Date().toISOString(),
+          createdAt: row[13] || new Date().toISOString(),
+          updatedAt: row[14] || new Date().toISOString(),
         } as Transaction;
       });
 

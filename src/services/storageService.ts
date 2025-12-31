@@ -41,9 +41,15 @@ export class StorageService {
     // NO LOCAL STORAGE - Only sync to Google Sheets
     // We need the full transaction object to update Google Sheets
     
+    // CRITICAL: NEVER ALLOW DATE TO BE UPDATED - Remove date from updates if present
+    const { date, ...safeUpdates } = updates as any;
+    if (date !== undefined) {
+      console.warn('⚠️ Attempted to update transaction date. Date updates are not allowed. Original date preserved.');
+    }
+    
     // AUTOMATIC TRAINING: If party name was updated, train from narration
-    if (updates.partyName !== undefined && fullTransaction?.description) {
-      const updatedTransaction = { ...fullTransaction, ...updates };
+    if (safeUpdates.partyName !== undefined && fullTransaction?.description) {
+      const updatedTransaction = { ...fullTransaction, ...safeUpdates };
       PartyMappingService.autoTrainFromNarration(
         updatedTransaction.description,
         updatedTransaction.partyName || undefined
@@ -56,7 +62,9 @@ export class StorageService {
     if (isGoogleSheetsConfigured() && fullTransaction) {
       const updatedTransaction = {
         ...fullTransaction,
-        ...updates,
+        ...safeUpdates,
+        // NEVER UPDATE DATE - preserve original date from fullTransaction
+        date: fullTransaction.date, // Always use original date, never from updates
         updatedAt: new Date().toISOString(),
       };
       // Update asynchronously (don't block the UI)

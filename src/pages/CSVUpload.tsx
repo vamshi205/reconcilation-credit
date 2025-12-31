@@ -235,11 +235,13 @@ export function CSVUpload() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-bold">CSV Upload</h1>
-          <p className="text-muted-foreground mt-1">Bulk import transactions from bank statement</p>
+          <h1 className="text-4xl font-display font-bold text-gradient">
+            CSV Upload
+          </h1>
+          <p className="text-muted-foreground mt-2">Bulk import transactions from bank statement</p>
         </div>
         {isGoogleSheetsConfigured() && (
           <Button
@@ -253,12 +255,12 @@ export function CSVUpload() {
         )}
       </div>
 
-      <Card>
-        <CardHeader>
+      <Card className="glass-card border-2 border-border/60 animate-fade-in">
+        <CardHeader className="bg-muted/30 border-b border-border/60">
           <CardTitle>Upload Bank Statement</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="border-2 border-dashed border-input rounded-lg p-8 text-center">
+          <div className="border-2 border-dashed border-border/60 rounded-lg p-8 text-center hover:border-primary/40 transition-colors">
             <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
             <p className="text-sm text-muted-foreground mb-4">
               Upload your bank statement file (CSV, XLS, or XLSX)
@@ -275,13 +277,14 @@ export function CSVUpload() {
               variant="outline"
               onClick={() => fileInputRef.current?.click()}
               disabled={isParsing}
+              className="btn-gradient"
             >
               {isParsing ? "Parsing..." : "Select File (CSV/Excel)"}
             </Button>
           </div>
 
-          <div className="p-4 bg-muted rounded-lg">
-            <p className="text-xs font-medium mb-2">Required File Format:</p>
+          <div className="p-4 bg-muted/50 rounded-lg border border-border/60">
+            <p className="text-xs font-semibold mb-2">Required File Format:</p>
             <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
               <li>Supported formats: CSV (.csv), Excel (.xls, .xlsx)</li>
               <li>Headers: Date, Narration, Chq./Ref.No., Value Dt, Withdrawal Amt., Deposit Amt., Closing Balance</li>
@@ -328,11 +331,11 @@ export function CSVUpload() {
 
           {parsedTransactions.length > 0 && (
             <>
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">
+              <div className="flex items-center justify-between p-4 bg-success/10 border border-success/20 rounded-lg">
+                <p className="text-sm font-semibold text-success">
                   ✅ Found {parsedTransactions.length} transactions
                 </p>
-                <Button onClick={handleSave} disabled={isSaving}>
+                <Button onClick={handleSave} disabled={isSaving} className="btn-gradient">
                   {isSaving ? "Saving..." : `Save ${parsedTransactions.length} Transactions`}
                 </Button>
               </div>

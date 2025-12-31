@@ -40,17 +40,17 @@ export function Sidebar() {
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed top-0 left-0 z-40 h-full w-64 bg-card border-r border-border transform transition-transform duration-300 ease-in-out",
+          "fixed top-0 left-0 z-40 h-full w-64 bg-sidebar border-r border-sidebar-border shadow-lg transform transition-transform duration-300 ease-in-out",
           mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
         <div className="h-full flex flex-col">
-          <div className="p-6 border-b border-border">
-            <h1 className="text-xl font-bold">Credit Records</h1>
-            <p className="text-sm text-muted-foreground mt-1">Manager</p>
+          <div className="p-6 border-b border-sidebar-border">
+            <h1 className="text-2xl font-display font-bold text-foreground">Credit Records</h1>
+            <p className="text-sm text-muted-foreground mt-1">Transaction Manager</p>
           </div>
 
-          <nav className="flex-1 p-4 space-y-2">
+          <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
             {navigation.map((item) => {
               const isActive = location.pathname === item.href;
               return (
@@ -59,10 +59,10 @@ export function Sidebar() {
                   to={item.href}
                   onClick={() => setMobileMenuOpen(false)}
                   className={cn(
-                    "flex items-center gap-3 px-4 py-3 rounded-lg transition-colors",
+                    "flex items-center gap-3 px-4 py-3 rounded-md transition-all duration-200 group",
                     isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-foreground hover:bg-accent hover:text-accent-foreground"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                   )}
                 >
                   <item.icon className="h-5 w-5" />

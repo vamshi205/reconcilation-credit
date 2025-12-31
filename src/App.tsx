@@ -11,18 +11,20 @@ import { PartyMappings } from "./pages/PartyMappings";
 function App() {
   return (
     <Router>
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-gradient-hero">
         <Sidebar />
-        <main className="lg:ml-64 p-4 lg:p-8">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/manual-entry" element={<ManualEntry />} />
-            <Route path="/csv-upload" element={<CSVUpload />} />
-            <Route path="/transactions" element={<Transactions />} />
-            <Route path="/reconciliation" element={<Reconciliation />} />
-            <Route path="/parties" element={<Parties />} />
-            <Route path="/party-mappings" element={<PartyMappings />} />
-          </Routes>
+        <main className="lg:ml-64 min-h-screen">
+          <div className="p-6 lg:p-8 max-w-7xl mx-auto">
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/manual-entry" element={<ManualEntry />} />
+              <Route path="/csv-upload" element={<CSVUpload />} />
+              <Route path="/transactions" element={<Transactions />} />
+              <Route path="/reconciliation" element={<Reconciliation />} />
+              <Route path="/parties" element={<Parties />} />
+              <Route path="/party-mappings" element={<PartyMappings />} />
+            </Routes>
+          </div>
         </main>
       </div>
     </Router>

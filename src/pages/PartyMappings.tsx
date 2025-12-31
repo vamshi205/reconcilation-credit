@@ -70,9 +70,14 @@ export function PartyMappings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Party Name Mappings</h1>
-        <p className="text-muted-foreground mt-1">
-          Manage learned party name corrections ({mappings.length} mappings)
+        <h1 className="text-4xl font-display font-bold text-gradient">
+          Party Name Mappings
+        </h1>
+        <p className="text-muted-foreground mt-2">
+          Manage learned party name corrections
+          <span className="ml-2 px-2 py-1 bg-secondary text-secondary-foreground rounded-full text-sm font-medium">
+            {mappings.length} mappings
+          </span>
         </p>
       </div>
 

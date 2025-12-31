@@ -60,8 +60,10 @@ export function Parties() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Parties</h1>
-        <p className="text-muted-foreground mt-1">
+        <h1 className="text-4xl font-display font-bold text-gradient">
+          Parties
+        </h1>
+        <p className="text-muted-foreground mt-2">
           Manage customers and suppliers with their balances
         </p>
       </div>
