@@ -42,9 +42,11 @@ export class StorageService {
     // We need the full transaction object to update Google Sheets
     
     // CRITICAL: NEVER ALLOW DATE TO BE UPDATED - Remove date from updates if present
+    // Date should ONLY be set from CSV upload, NEVER modified after that
     const { date, ...safeUpdates } = updates as any;
     if (date !== undefined) {
-      console.warn('⚠️ Attempted to update transaction date. Date updates are not allowed. Original date preserved.');
+      console.warn('⚠️ BLOCKED: Attempted to update transaction date. Date updates are FORBIDDEN. Original date preserved.');
+      console.warn('⚠️ Original date:', fullTransaction?.date, 'Attempted date:', date);
     }
     
     // AUTOMATIC TRAINING: If party name was updated, train from narration
@@ -60,13 +62,25 @@ export class StorageService {
 
     // SYNC TO GOOGLE SHEETS: Update transaction in Google Sheets if configured
     if (isGoogleSheetsConfigured() && fullTransaction) {
+      // CRITICAL: Preserve original date - it should NEVER be changed
+      const originalDate = fullTransaction.date;
+      console.log('🔒 Preserving original date for transaction update:', originalDate);
+      
       const updatedTransaction = {
         ...fullTransaction,
         ...safeUpdates,
         // NEVER UPDATE DATE - preserve original date from fullTransaction
-        date: fullTransaction.date, // Always use original date, never from updates
+        // Date should ONLY be set from CSV upload, NEVER modified
+        date: originalDate, // Always use original date, never from updates or current time
         updatedAt: new Date().toISOString(),
       };
+      
+      // Double-check: Verify date hasn't been modified
+      if (updatedTransaction.date !== originalDate) {
+        console.error('❌ CRITICAL ERROR: Date was modified during update! Restoring original date.');
+        updatedTransaction.date = originalDate;
+      }
+      
       // Update asynchronously (don't block the UI)
       updateTransactionInSheets(updatedTransaction).catch(error => {
         console.error('Failed to sync transaction update to Google Sheets:', error);

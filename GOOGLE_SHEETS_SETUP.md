@@ -143,10 +143,19 @@ function doPost(e) {
           .setMimeType(ContentService.MimeType.JSON);
       }
       
-      // Update the row with new data (including the Transaction ID)
+      // CRITICAL: Preserve original date from sheet - Date should NEVER be updated
+      // Date column is index 1 (second column, 0-indexed)
+      const existingRow = values[rowIndex - 1]; // rowIndex is 1-indexed, values array is 0-indexed
+      const originalDate = existingRow[1]; // Get original date from existing row
+      
+      // Preserve the original date - do NOT update it
+      rowData[1] = originalDate;
+      Logger.log('🔒 Preserving original date: ' + originalDate + ' (Date updates are FORBIDDEN)');
+      
+      // Update the row with new data, but with preserved original date
       sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
       
-      Logger.log('Successfully updated row ' + rowIndex + ' for transaction ID: ' + transactionId);
+      Logger.log('Successfully updated row ' + rowIndex + ' for transaction ID: ' + transactionId + ' (date preserved)');
       return ContentService.createTextOutput(JSON.stringify({ success: true, row: rowIndex }))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'appendRows') {
@@ -279,6 +288,31 @@ function doGet(e) {
       Logger.log('Returning ' + dataRows.length + ' party mappings');
       return ContentService.createTextOutput(JSON.stringify({ success: true, data: dataRows }))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'getParties') {
+      // Fetch all parties from the Parties sheet (for word-by-word matching)
+      const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+      let sheet = spreadsheet.getSheetByName('Parties');
+      if (!sheet) {
+        // Create Parties sheet if it doesn't exist
+        sheet = spreadsheet.insertSheet('Parties');
+        sheet.appendRow(['Party Name']); // Header row
+      }
+      
+      const dataRange = sheet.getDataRange();
+      const values = dataRange.getValues();
+      
+      // Skip header row (row 0)
+      if (values.length <= 1) {
+        return ContentService.createTextOutput(JSON.stringify({ success: true, data: [] }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      
+      // Get all data rows (skip header) - each row contains a party name in the first column
+      const dataRows = values.slice(1).map(row => [row[0] || '']); // Only return first column (party name)
+      
+      Logger.log('Returning ' + dataRows.length + ' parties');
+      return ContentService.createTextOutput(JSON.stringify({ success: true, data: dataRows }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
     
     // Default response
@@ -290,6 +324,29 @@ function doGet(e) {
   }
 }
 ```
+
+## Step 1.5: Create Parties Sheet (Optional but Recommended)
+
+To enable word-by-word party name matching, create a separate sheet with your party names:
+
+1. In your Google Sheet, create a new sheet named **"Parties"**
+2. Add a header row: **Party Name** (in cell A1)
+3. List all your party names in column A (one per row), for example:
+   - ARCHANA HOSPITALS PVT LTD
+   - QUALITY CARE INDIA LTD
+   - ST THERESAS HOSPITAL
+   - HANISH HEALTH CARE SERVICES
+   - CHIRANJEVI MULTI SPECILITY HOSPITAL
+   - DOCTAZ HEALTH CARE PVT LTD
+   - etc.
+
+The system will use this list to match party names word-by-word in transaction narrations, providing accurate recommendations.
+
+**How word-by-word matching works:**
+- The system checks if ALL significant words of a party name appear in the narration
+- For example, "HANISH HEALTH CARE SERVICES" will match if the narration contains: "hanish", "health", "care", and "services"
+- Common words like "pvt", "ltd", "and", "the" are ignored for matching
+- This ensures accurate recommendations without false positives
 
 ## Step 2: Deploy as Web App
 

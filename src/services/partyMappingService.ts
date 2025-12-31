@@ -4,7 +4,9 @@ import {
   savePartyMappingToSheets, 
   updatePartyMappingInSheets,
   isGoogleSheetsConfigured,
-  PartyNameMapping
+  PartyNameMapping,
+  fetchPartiesFromSheets,
+  findMatchingParties
 } from './googleSheetsService';
 
 // Re-export for backward compatibility
@@ -14,6 +16,11 @@ export type { PartyNameMapping };
 let mappingsCache: PartyNameMapping[] = [];
 let mappingsCacheTime: number = 0;
 const CACHE_DURATION = 60000; // 1 minute cache
+
+// Cache for parties list (loaded from Google Sheets)
+let partiesCache: string[] = [];
+let partiesCacheTime: number = 0;
+const PARTIES_CACHE_DURATION = 300000; // 5 minutes cache (parties list changes less frequently)
 
 export class PartyMappingService {
   /**
@@ -69,6 +76,43 @@ export class PartyMappingService {
   }
 
   /**
+   * Get all parties from Google Sheets (cached)
+   */
+  static async getParties(): Promise<string[]> {
+    const now = Date.now();
+    if (partiesCache.length > 0 && (now - partiesCacheTime) < PARTIES_CACHE_DURATION) {
+      return partiesCache;
+    }
+
+    if (isGoogleSheetsConfigured()) {
+      try {
+        partiesCache = await fetchPartiesFromSheets();
+        partiesCacheTime = now;
+        return partiesCache;
+      } catch (error) {
+        console.error('Error fetching parties from Google Sheets:', error);
+        return partiesCache; // Return cached data on error
+      }
+    }
+    
+    return [];
+  }
+
+  /**
+   * Find party names from narration using word-by-word matching against parties list
+   * Returns top 2-3 matches
+   */
+  static async findPartiesFromNarration(narration: string, maxMatches: number = 3): Promise<string[]> {
+    if (!narration || narration.trim().length < 5) return [];
+    
+    const parties = await this.getParties();
+    if (parties.length === 0) return [];
+    
+    // Use word-by-word matching to find top matches
+    return findMatchingParties(narration, parties, maxMatches);
+  }
+
+  /**
    * Get suggested name for an original name (async)
    * Checks for exact match first, then partial matches
    */
@@ -87,29 +131,45 @@ export class PartyMappingService {
       return exactMatch.correctedName;
     }
     
-    // Then, try partial match - check if the party name contains or is contained in any learned pattern
+    // Then, try partial match - but be very strict to avoid false positives
+    // Only suggest if the extracted name is clearly similar to a learned pattern
     // This helps when we learned "sri raja rajeswari ortho" but the transaction has "sri raja rajeswari ortho plus"
-    const normalizedWords = normalized.split(/\s+/).filter(w => w.length > 2);
+    const normalizedWords = normalized.split(/\s+/).filter(w => w.length > 3); // Only consider words longer than 3 chars
     
-    // Find mappings where the original name contains significant words from the party name
+    // Find mappings where the original name is clearly similar to the extracted name
     for (const mapping of mappings) {
       const mappingNormalized = mapping.originalName.toLowerCase().replace(/\s+/g, " ");
-      const mappingWords = mappingNormalized.split(/\s+/).filter(w => w.length > 2);
+      const mappingWords = mappingNormalized.split(/\s+/).filter(w => w.length > 3);
       
-      // Check if there's significant overlap (at least 2 words match)
-      const matchingWords = normalizedWords.filter(w => mappingWords.includes(w));
-      if (matchingWords.length >= 2 && mappingWords.length >= 2) {
-        // If the learned pattern is longer/more specific, use it
-        if (mappingNormalized.length > normalized.length * 0.8) {
+      // STRICT MATCHING: Only suggest if:
+      // 1. The extracted name contains the learned pattern (e.g., "ortho plus" contains "ortho")
+      // 2. OR the learned pattern contains the extracted name (e.g., "ortho" is in "ortho plus")
+      // 3. AND they share at least 50% of significant words
+      if (normalized.includes(mappingNormalized) || mappingNormalized.includes(normalized)) {
+        // Check word overlap to ensure they're actually similar
+        const matchingWords = normalizedWords.filter(w => mappingWords.includes(w));
+        const totalSignificantWords = Math.max(normalizedWords.length, mappingWords.length);
+        const overlapRatio = matchingWords.length / totalSignificantWords;
+        
+        // Only suggest if there's at least 50% word overlap AND at least 2 matching words
+        if (overlapRatio >= 0.5 && matchingWords.length >= 2) {
           return mapping.correctedName;
         }
       }
       
-      // Also check if the party name contains the learned pattern
-      if (normalized.includes(mappingNormalized) || mappingNormalized.includes(normalized)) {
-        // Prefer the more specific/corrected name
-        if (mapping.correctedName.length > normalized.length) {
-          return mapping.correctedName;
+      // Also check for very close matches (e.g., "archana hospitals" vs "archana hospitals pvt ltd")
+      // But only if they share most of their words
+      if (normalizedWords.length >= 2 && mappingWords.length >= 2) {
+        const matchingWords = normalizedWords.filter(w => mappingWords.includes(w));
+        const minWords = Math.min(normalizedWords.length, mappingWords.length);
+        // Require at least 75% of words to match for very similar names
+        if (matchingWords.length >= Math.ceil(minWords * 0.75) && matchingWords.length >= 2) {
+          // Additional check: the names should be similar in length (within 50% difference)
+          const lengthRatio = Math.min(normalized.length, mappingNormalized.length) / 
+                             Math.max(normalized.length, mappingNormalized.length);
+          if (lengthRatio >= 0.5) {
+            return mapping.correctedName;
+          }
         }
       }
     }
@@ -265,20 +325,38 @@ export class PartyMappingService {
     // Extract potential party names from narration
     const extractedPatterns: string[] = [];
 
-    // Method 1: Extract from colons (CHQ DEP patterns)
-    const colonPattern = desc.match(/:\s*([A-Z][A-Z\s\w]+?)\s*:/i);
+    // Method 1: Extract from colons (CHQ DEP patterns like "CHQ DEP - HYDERABAD - CTS CLG2 - WBO HYD: COMPANY NAME :BANK")
+    const colonPattern = desc.match(/:\s*([A-Z][A-Z\s\w&]+?)\s*:/i);
     if (colonPattern && colonPattern[1]) {
       const extracted = colonPattern[1].trim().toLowerCase();
-      if (extracted.length > 3 && extracted.length < 100) {
+      // Filter out common bank names and locations
+      const excludeWords = ['union bank', 'state bank', 'canara bank', 'punjab national', 'hyderabad', 'wbo', 'cts', 'clg'];
+      const shouldExclude = excludeWords.some(word => extracted.includes(word));
+      if (!shouldExclude && extracted.length > 3 && extracted.length < 100) {
         extractedPatterns.push(extracted);
       }
     }
 
-    // Method 2: Extract between transaction codes and account numbers
+    // Method 2: Extract from NEFT/IMPS patterns (NEFT CR-XXXX-COMPANY NAME-XXXX)
+    // Pattern: NEFT CR-XXXX-COMPANY NAME-XXXX or NEFT CR-XXXX-COMPANY NAME-ACCOUNT
+    const neftPattern1 = desc.match(/(?:NEFT|IMPS|RTGS)\s*(?:CR|DR)?[\s\-]+[A-Z0-9]+[\s\-]+([A-Z][A-Z\s\w&]+?)[\s\-]+(?:[A-Z]{4,}|[A-Z]{2,4}\d{6,}|SRI\s+RAJA|SRI\s+RAJESHWARI)/i);
+    if (neftPattern1 && neftPattern1[1]) {
+      const extracted = neftPattern1[1].trim().toLowerCase();
+      if (extracted.length > 3 && extracted.length < 100 && !extracted.includes('sri raja')) {
+        extractedPatterns.push(extracted);
+      }
+    }
+
+    // Method 3: Extract between transaction codes and account numbers (enhanced patterns)
     const patterns = [
-      /(?:NEFT|IMPS|RTGS|UPI|FT)\s*(?:CR|DR)?[\s\-]+[A-Z0-9]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z]{4,}|[A-Z]{2}\d{10,}|\d{10,})/i,
-      /(?:NEFT|IMPS|RTGS|UPI|FT|CHQ)\s*(?:CR|DR)?[\s\-]+\d+[\s\-]+([A-Z][A-Z\s\w]+?)(?:\s*-\s*\d+|\s*$)/i,
-      /(?:UPI|NEFT|IMPS)[\s\-]+[\d\-@]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z0-9@]+|\d+)/i,
+      // NEFT CR-XXXX-COMPANY NAME-SRI RAJA... or NEFT CR-XXXX-COMPANY NAME-ACCOUNT
+      /(?:NEFT|IMPS|RTGS)\s*(?:CR|DR)?[\s\-]+[A-Z0-9]+[\s\-]+([A-Z][A-Z\s\w&]+?)[\s\-]+(?:SRI\s+RAJA|SRI\s+RAJESHWARI|[A-Z]{2,4}\d{6,})/i,
+      // CHQ DEP patterns with company name before bank name
+      /CHQ\s+DEP[^:]*:\s*([A-Z][A-Z\s\w&]+?)\s*:[A-Z\s]+BANK/i,
+      // UPI patterns
+      /(?:UPI|NEFT|IMPS)[\s\-]+[\d\-@]+[\s\-]+([A-Z][A-Z\s\w&]+?)[\s\-]+(?:[A-Z0-9@]+|\d+)/i,
+      // Generic pattern for transactions with company names
+      /(?:NEFT|IMPS|RTGS|UPI|FT|CHQ)\s*(?:CR|DR)?[\s\-]+\d+[\s\-]+([A-Z][A-Z\s\w&]+?)(?:\s*-\s*\d+|\s*$)/i,
     ];
 
     for (const pattern of patterns) {

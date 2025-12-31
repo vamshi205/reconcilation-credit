@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card"
 import { Input } from "../components/ui/Input";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Button } from "../components/ui/Button";
-import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock } from "lucide-react";
+import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Label } from "../components/ui/Label";
 import { Modal } from "../components/ui/Modal";
@@ -47,7 +47,7 @@ export function Transactions() {
   const [editingPartyValue, setEditingPartyValue] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
-  const [partySuggestions, setPartySuggestions] = useState<Record<string, string | null>>({});
+  const [partySuggestions, setPartySuggestions] = useState<Record<string, string[] | null>>({});
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -59,7 +59,7 @@ export function Transactions() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalPartyName, setModalPartyName] = useState("");
   const [modalVyaparRef, setModalVyaparRef] = useState("");
-  const [modalSuggestion, setModalSuggestion] = useState<string | null>(null);
+  const [modalSuggestions, setModalSuggestions] = useState<string[]>([]);
 
   // Load transactions from Google Sheets (single source of truth - no local storage fallback)
   const loadTransactions = useCallback(async () => {
@@ -190,10 +190,12 @@ export function Transactions() {
     // Note: We check inputValues inside the filter function, but don't include it in dependencies
     // This prevents re-renders while typing, but still shows correct filtering
     if (view === "pending") {
-      // Pending: Transactions that are NOT completed and NOT on hold
+      // Pending: Transactions that are NOT completed and NOT on hold and NOT self transfer
       filtered = filtered.filter((t) => {
         const isHold = t.hold === true;
         if (isHold) return false; // Exclude hold transactions
+        const isSelfTransfer = t.selfTransfer === true;
+        if (isSelfTransfer) return false; // Exclude self transfer transactions
         const isChecked = Boolean(t.added_to_vyapar || t.inVyapar);
         const storageRef = t.vyapar_reference_number ? String(t.vyapar_reference_number).trim() : '';
         const localRef = inputValues[t.id] ? String(inputValues[t.id]).trim() : '';
@@ -203,10 +205,12 @@ export function Transactions() {
         return !(isChecked && hasReference && hasPartyName);
       });
     } else if (view === "completed") {
-      // Completed: BOTH checkbox checked AND reference number entered AND party name entered (and not on hold)
+      // Completed: BOTH checkbox checked AND reference number entered AND party name entered (and not on hold and not self transfer)
       filtered = filtered.filter((t) => {
         const isHold = t.hold === true;
         if (isHold) return false; // Exclude hold transactions
+        const isSelfTransfer = t.selfTransfer === true;
+        if (isSelfTransfer) return false; // Exclude self transfer transactions
         const isChecked = Boolean(t.added_to_vyapar || t.inVyapar);
         const storageRef = t.vyapar_reference_number ? String(t.vyapar_reference_number).trim() : '';
         const localRef = inputValues[t.id] ? String(inputValues[t.id]).trim() : '';
@@ -310,8 +314,8 @@ export function Transactions() {
         // If transaction has a party name, check for suggestions for that name
         if (transaction.partyName) {
           foundSuggestion = await PartyMappingService.getSuggestedName(transaction.partyName);
-          if (foundSuggestion && foundSuggestion !== transaction.partyName) {
-            setPartySuggestions(prev => ({ ...prev, [transaction.id]: foundSuggestion }));
+          if (foundSuggestion && foundSuggestion.trim().length > 0 && foundSuggestion !== transaction.partyName) {
+            setPartySuggestions(prev => ({ ...prev, [transaction.id]: [foundSuggestion] }));
             loadingSuggestionsRef.current.delete(transaction.id);
             return;
           }
@@ -320,38 +324,79 @@ export function Transactions() {
         // If no party name or no suggestion found, extract from description (like CSVUpload does)
         if (transaction.description && !foundSuggestion) {
           const desc = transaction.description.trim();
+          let extractedPartyName: string | null = null;
           
-          // Method 1: Extract text between colons
-          const colonPattern = desc.match(/:\s*([A-Z][A-Z\s\w]+?)\s*:/i);
-          if (colonPattern && colonPattern[1]) {
-            const extracted = colonPattern[1].trim().toLowerCase();
-            if (extracted.length > 3 && extracted.length < 100) {
-              foundSuggestion = await PartyMappingService.getSuggestedName(extracted);
+          // NEW METHOD 0: Word-by-word matching against parties list from Google Sheets (PRIORITY)
+          const matchedParties = await PartyMappingService.findPartiesFromNarration(desc, 3);
+          if (matchedParties.length > 0) {
+            // Filter out blank/empty recommendations
+            const validParties = matchedParties.filter(p => p && p.trim().length > 0);
+            if (validParties.length > 0) {
+              // Store multiple suggestions
+              setPartySuggestions(prev => ({ ...prev, [transaction.id]: validParties }));
+              // Don't continue to other methods - we found matches from the parties list
+              loadingSuggestionsRef.current.delete(transaction.id);
+              return; // Exit early
             }
           }
           
-          // Method 2: Extract from patterns
-          if (!foundSuggestion) {
+          // Continue to other methods if no valid matches found
+          {
+            // Method 1: Extract text between colons (CHQ DEP patterns like "CHQ DEP - HYDERABAD - CTS CLG2 - WBO HYD: COMPANY NAME :BANK")
+            const colonPattern = desc.match(/:\s*([A-Z][A-Z\s\w&]+?)\s*:/i);
+            if (colonPattern && colonPattern[1]) {
+              const extracted = colonPattern[1].trim();
+              // Filter out common bank names and locations
+              const excludeWords = ['union bank', 'state bank', 'canara bank', 'punjab national', 'indian bank', 'hyderabad', 'wbo', 'cts', 'clg'];
+              const extractedLower = extracted.toLowerCase();
+              const shouldExclude = excludeWords.some(word => extractedLower.includes(word));
+              if (!shouldExclude && extracted.length > 3 && extracted.length < 100) {
+                extractedPartyName = extracted;
+                // Check if we have a learned mapping for this extracted name
+                foundSuggestion = await PartyMappingService.getSuggestedName(extractedLower);
+                // Only use suggestion if it's not blank
+                if (!foundSuggestion || foundSuggestion.trim().length === 0) {
+                  foundSuggestion = null;
+                }
+                // If we found a clear party name from colon pattern, STOP searching further
+                // Don't continue to other methods - we've found the actual party name in the narration
+                // Only show suggestion if we have a learned mapping, otherwise let user enter it manually
+              }
+            }
+            
+            // Method 2: Extract from patterns (enhanced for sample data) - only if we haven't found a clear party name from colon pattern
+            if (!foundSuggestion && !extractedPartyName) {
             const patterns = [
-              /(?:NEFT|IMPS|RTGS|UPI|FT)\s*(?:CR|DR)?[\s\-]+[A-Z0-9]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z]{4,}|[A-Z]{2}\d{10,}|\d{10,})/i,
-              /(?:NEFT|IMPS|RTGS|UPI|FT|CHQ)\s*(?:CR|DR)?[\s\-]+\d+[\s\-]+([A-Z][A-Z\s\w]+?)(?:\s*-\s*\d+|\s*$)/i,
-              /(?:UPI|NEFT|IMPS)[\s\-]+[\d\-@]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z0-9@]+|\d+)/i,
+              // NEFT CR-XXXX-COMPANY NAME-SRI RAJA... pattern
+              /(?:NEFT|IMPS|RTGS)\s*(?:CR|DR)?[\s\-]+[A-Z0-9]+[\s\-]+([A-Z][A-Z\s\w&]+?)[\s\-]+(?:SRI\s+RAJA|SRI\s+RAJESHWARI|[A-Z]{2,4}\d{6,})/i,
+              // CHQ DEP patterns with company name before bank name
+              /CHQ\s+DEP[^:]*:\s*([A-Z][A-Z\s\w&]+?)\s*:[A-Z\s]+BANK/i,
+              // Generic NEFT/IMPS patterns
+              /(?:NEFT|IMPS|RTGS|UPI|FT)\s*(?:CR|DR)?[\s\-]+[A-Z0-9]+[\s\-]+([A-Z][A-Z\s\w&]+?)[\s\-]+(?:[A-Z]{4,}|[A-Z]{2}\d{10,}|\d{10,})/i,
+              /(?:NEFT|IMPS|RTGS|UPI|FT|CHQ)\s*(?:CR|DR)?[\s\-]+\d+[\s\-]+([A-Z][A-Z\s\w&]+?)(?:\s*-\s*\d+|\s*$)/i,
+              /(?:UPI|NEFT|IMPS)[\s\-]+[\d\-@]+[\s\-]+([A-Z][A-Z\s\w&]+?)[\s\-]+(?:[A-Z0-9@]+|\d+)/i,
             ];
             
             for (const pattern of patterns) {
               const match = desc.match(pattern);
               if (match && match[1]) {
                 const extracted = match[1].trim().toLowerCase();
-                if (extracted.length > 3 && extracted.length < 100) {
+                // Filter out "SRI RAJA" patterns and other unwanted text
+                if (!extracted.includes('sri raja') && extracted.length > 3 && extracted.length < 100) {
                   foundSuggestion = await PartyMappingService.getSuggestedName(extracted);
-                  if (foundSuggestion) break;
+                  // Only use suggestion if it's not blank
+                  if (foundSuggestion && foundSuggestion.trim().length > 0) {
+                    break;
+                  } else {
+                    foundSuggestion = null;
+                  }
                 }
               }
             }
           }
           
-          // Method 3: Extract meaningful parts
-          if (!foundSuggestion) {
+          // Method 3: Extract meaningful parts - only if we haven't found a clear party name from colon pattern
+          if (!foundSuggestion && !extractedPartyName) {
             const parts = desc
               .split(/[\s\-:]+/)
               .filter(p => p.length > 2)
@@ -368,14 +413,19 @@ export function Transactions() {
                 const phrase = parts.slice(i, i + len).join(" ").toLowerCase();
                 if (phrase.length > 5 && phrase.length < 80) {
                   foundSuggestion = await PartyMappingService.getSuggestedName(phrase);
-                  if (foundSuggestion) break;
+                  // Only use suggestion if it's not blank
+                  if (foundSuggestion && foundSuggestion.trim().length > 0) {
+                    break;
+                  } else {
+                    foundSuggestion = null;
+                  }
                 }
               }
             }
           }
           
-          // Method 4: Clean full description
-          if (!foundSuggestion) {
+          // Method 4: Clean full description - only if we haven't found a clear party name yet
+          if (!foundSuggestion && !extractedPartyName) {
             let cleanedDesc = desc
               .replace(/REF\s*NO[:\-]?\s*[A-Z0-9]+/gi, " ")
               .replace(/TXN\s*ID[:\-]?\s*[A-Z0-9]+/gi, " ")
@@ -392,13 +442,19 @@ export function Transactions() {
             
             if (cleanedDesc.length > 5) {
               foundSuggestion = await PartyMappingService.getSuggestedName(cleanedDesc);
+              // Only use suggestion if it's not blank
+              if (!foundSuggestion || foundSuggestion.trim().length === 0) {
+                foundSuggestion = null;
+              }
             }
+          }
           }
         }
         
         // Update suggestions cache
-        if (foundSuggestion) {
-          setPartySuggestions(prev => ({ ...prev, [transaction.id]: foundSuggestion }));
+        if (foundSuggestion && foundSuggestion.trim().length > 0) {
+          // Convert single suggestion to array format
+          setPartySuggestions(prev => ({ ...prev, [transaction.id]: [foundSuggestion] }));
         } else {
           // Mark as checked (no suggestion) to prevent re-checking
           setPartySuggestions(prev => ({ ...prev, [transaction.id]: null }));
@@ -809,8 +865,8 @@ export function Transactions() {
           if (t.partyName && !loadingSuggestionsRef.current.has(t.id)) {
             loadingSuggestionsRef.current.add(t.id);
             PartyMappingService.getSuggestedName(t.partyName).then(suggested => {
-              if (suggested && suggested !== t.partyName) {
-                setPartySuggestions(prev => ({ ...prev, [t.id]: suggested }));
+              if (suggested && suggested.trim().length > 0 && suggested !== t.partyName) {
+                setPartySuggestions(prev => ({ ...prev, [t.id]: [suggested] }));
               }
               loadingSuggestionsRef.current.delete(t.id);
             }).catch(() => {
@@ -878,9 +934,25 @@ export function Transactions() {
     if (confirmed) {
       const transaction = transactions.find((t) => t.id === transactionId);
       if (transaction) {
+        // CRITICAL: NEVER UPDATE DATE - preserve original date from CSV upload
+        const originalDate = transaction.date;
+        console.log('🔒 Preserving original date:', originalDate, 'for transaction:', transactionId);
+        
+        // Only update selfTransfer flag, never date
         StorageService.updateTransaction(transactionId, { selfTransfer: true }, transaction);
         setTransactions((prev) =>
-          prev.map((t) => (t.id === transactionId ? { ...t, selfTransfer: true, date: t.date } : t))
+          prev.map((t) => {
+            if (t.id === transactionId) {
+              // Ensure date is preserved
+              const updated = { ...t, selfTransfer: true, date: originalDate };
+              if (updated.date !== originalDate) {
+                console.error('❌ ERROR: Date was modified! Restoring original date.');
+                updated.date = originalDate;
+              }
+              return updated;
+            }
+            return t;
+          })
         );
         // Switch to self transfer view
         setView("selfTransfer");
@@ -934,39 +1006,53 @@ export function Transactions() {
     setEditingTransaction(transaction);
     setModalPartyName(transaction.partyName || "");
     setModalVyaparRef(transaction.vyapar_reference_number || "");
-    setModalSuggestion(null); // Reset suggestion
+    setModalSuggestions([]); // Reset suggestions
     
-    // Load suggestion for this transaction
+    // Load suggestions for this transaction
     if (transaction.description) {
       const desc = transaction.description.trim();
+      let foundSuggestions: string[] = []; // Track suggestions locally
       
-      // Try to extract party name from description using various patterns
-      const patterns = [
-        /(?:NEFT|IMPS|RTGS|UPI|FT)\s*(?:CR|DR)?[\s\-]+[A-Z0-9]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z]{4,}|[A-Z]{2}\d{10,}|\d{10,})/i,
-        /(?:NEFT|IMPS|RTGS|UPI|FT|CHQ)\s*(?:CR|DR)?[\s\-]+\d+[\s\-]+([A-Z][A-Z\s\w]+?)(?:\s*-\s*\d+|\s*$)/i,
-        /(?:UPI|NEFT|IMPS)[\s\-]+[\d\-@]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z0-9@]+|\d+)/i,
-      ];
-      
-      let extractedName = "";
-      for (const pattern of patterns) {
-        const match = desc.match(pattern);
-        if (match && match[1]) {
-          extractedName = match[1].trim();
-          break;
+      // Try word-by-word matching first (returns top 2-3 matches)
+      const matchedParties = await PartyMappingService.findPartiesFromNarration(desc, 3);
+      if (matchedParties.length > 0) {
+        // Filter out blank/empty recommendations
+        const validParties = matchedParties.filter(p => p && p.trim().length > 0);
+        if (validParties.length > 0) {
+          foundSuggestions = validParties;
         }
       }
       
-      // If we extracted a name, try to get suggestion for it
-      if (extractedName) {
-        const suggested = await PartyMappingService.getSuggestedName(extractedName);
-        if (suggested) {
-          setModalSuggestion(suggested);
+      // If no suggestions from word-by-word matching, try pattern extraction
+      if (foundSuggestions.length === 0) {
+        // Try to extract party name from description using various patterns
+        const patterns = [
+          /(?:NEFT|IMPS|RTGS|UPI|FT)\s*(?:CR|DR)?[\s\-]+[A-Z0-9]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z]{4,}|[A-Z]{2}\d{10,}|\d{10,})/i,
+          /(?:NEFT|IMPS|RTGS|UPI|FT|CHQ)\s*(?:CR|DR)?[\s\-]+\d+[\s\-]+([A-Z][A-Z\s\w]+?)(?:\s*-\s*\d+|\s*$)/i,
+          /(?:UPI|NEFT|IMPS)[\s\-]+[\d\-@]+[\s\-]+([A-Z][A-Z\s\w]+?)[\s\-]+(?:[A-Z0-9@]+|\d+)/i,
+        ];
+        
+        let extractedName = "";
+        for (const pattern of patterns) {
+          const match = desc.match(pattern);
+          if (match && match[1]) {
+            extractedName = match[1].trim();
+            break;
+          }
+        }
+        
+        // If we extracted a name, try to get suggestion for it
+        if (extractedName) {
+          const suggested = await PartyMappingService.getSuggestedName(extractedName);
+          if (suggested && suggested.trim().length > 0) {
+            foundSuggestions = [suggested];
+          }
         }
       }
       
-      // If no suggestion yet, try to get suggestion from the description itself
-      if (!modalSuggestion) {
-        // Try getting suggestion from cleaned description parts
+      // If no suggestion yet, try to get suggestions from the description itself
+      if (foundSuggestions.length === 0) {
+        // Try getting suggestions from cleaned description parts
         const parts = desc
           .split(/[\s\-:]+/)
           .filter(p => p.length > 3)
@@ -975,13 +1061,22 @@ export function Transactions() {
           .filter(p => !/^\d{10,}$/.test(p))
           .slice(0, 5); // Take first 5 meaningful parts
         
+        const tempSuggestions: string[] = [];
         for (const part of parts) {
           const suggested = await PartyMappingService.getSuggestedName(part);
-          if (suggested) {
-            setModalSuggestion(suggested);
-            break;
+          if (suggested && suggested.trim().length > 0 && !tempSuggestions.includes(suggested)) {
+            tempSuggestions.push(suggested);
+            if (tempSuggestions.length >= 3) break;
           }
         }
+        if (tempSuggestions.length > 0) {
+          foundSuggestions = tempSuggestions;
+        }
+      }
+      
+      // Set all found suggestions at once
+      if (foundSuggestions.length > 0) {
+        setModalSuggestions(foundSuggestions);
       }
     }
   };
@@ -991,7 +1086,7 @@ export function Transactions() {
     setEditingTransaction(null);
     setModalPartyName("");
     setModalVyaparRef("");
-    setModalSuggestion(null);
+    setModalSuggestions([]);
   };
 
   // Handle submitting transaction from modal (move to completed)
@@ -1091,22 +1186,34 @@ export function Transactions() {
   const handleMoveToSelfTransfer = async () => {
     if (!editingTransaction) return;
     
+    // CRITICAL: NEVER UPDATE DATE - Date should only be set from CSV upload, never modified
+    // Store original date to ensure it's never changed
+    const originalDate = editingTransaction.date;
+    console.log('🔒 Preserving original date:', originalDate, 'for transaction:', editingTransaction.id);
+    
     // Update transaction to self transfer status
-    // NEVER UPDATE DATE - preserve original date
+    // NEVER UPDATE DATE - preserve original date from CSV upload
     const updatedTransaction = {
       ...editingTransaction,
       selfTransfer: true,
       // Don't require party name or vyapar ref for self transfer
       partyName: modalPartyName.trim() || editingTransaction.partyName || undefined,
       vyapar_reference_number: modalVyaparRef.trim() || editingTransaction.vyapar_reference_number || undefined,
-      date: editingTransaction.date, // Explicitly preserve original date
+      date: originalDate, // CRITICAL: Always use original date, never update
     };
     
-    // Save to Google Sheets
+    // Verify date hasn't changed
+    if (updatedTransaction.date !== originalDate) {
+      console.error('❌ ERROR: Date was modified! Restoring original date.');
+      updatedTransaction.date = originalDate;
+    }
+    
+    // Save to Google Sheets - only send fields that can be updated, NEVER date
     StorageService.updateTransaction(editingTransaction.id, {
       selfTransfer: true,
       partyName: updatedTransaction.partyName,
       vyapar_reference_number: updatedTransaction.vyapar_reference_number,
+      // DO NOT include date in updates - it will be preserved from fullTransaction
     }, updatedTransaction);
     
     // Learn from narration if party name was provided
@@ -1127,6 +1234,128 @@ export function Transactions() {
     handleCloseEditModal();
     
     alert("Transaction moved to self transfer!");
+  };
+
+  // Print/PDF export function
+  const handlePrint = () => {
+    if (filteredTransactions.length === 0) {
+      alert("No transactions to print. Please adjust your filters.");
+      return;
+    }
+
+    // Create print-friendly HTML
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Please allow popups to print the transactions.");
+      return;
+    }
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Pending Transactions Report</title>
+          <style>
+            @media print {
+              @page {
+                size: A4;
+                margin: 1cm;
+              }
+            }
+            body {
+              font-family: Arial, sans-serif;
+              font-size: 12px;
+              margin: 0;
+              padding: 20px;
+              color: #000;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 20px;
+              border-bottom: 2px solid #000;
+              padding-bottom: 10px;
+            }
+            .header h1 {
+              margin: 0;
+              font-size: 24px;
+              font-weight: bold;
+            }
+            .header .subtitle {
+              margin-top: 5px;
+              font-size: 14px;
+              color: #666;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 20px;
+            }
+            th {
+              background-color: #333;
+              color: #fff;
+              padding: 10px;
+              text-align: left;
+              font-weight: bold;
+              border: 2px solid #000;
+            }
+            td {
+              padding: 10px;
+              border: 1px solid #000;
+              vertical-align: top;
+            }
+            .date-col {
+              width: 15%;
+              white-space: nowrap;
+            }
+            .narration-col {
+              width: 55%;
+            }
+            .party-col {
+              width: 30%;
+              min-height: 30px;
+            }
+            tr:nth-child(even) {
+              background-color: #f9f9f9;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Pending Transactions Report</h1>
+            <div class="subtitle">Generated on ${new Date().toLocaleString('en-IN', { dateStyle: 'long', timeStyle: 'short' })}</div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th class="date-col">Date</th>
+                <th class="narration-col">Narration</th>
+                <th class="party-col">Party Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filteredTransactions.map((t) => {
+                return `
+                  <tr>
+                    <td class="date-col">${formatDate(t.date)}</td>
+                    <td class="narration-col">${t.description || ''}</td>
+                    <td class="party-col">&nbsp;</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    
+    // Wait for content to load, then trigger print
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
   };
 
   return (
@@ -1327,6 +1556,17 @@ export function Transactions() {
                   />
                 </div>
                 <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handlePrint}
+                  disabled={filteredTransactions.length === 0}
+                  className="h-9 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                  title="Print/Save as PDF"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print PDF
+                </Button>
+                <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => {
@@ -1361,15 +1601,14 @@ export function Transactions() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Date Range Filters */}
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-5">
             <div>
                 <Label htmlFor="dateFromCompleted">From Date (DD/MM/YYYY)</Label>
               <DatePicker
                 id="dateFromCompleted"
                 value={dateFrom}
                 onChange={(value) => {
-                  if (view === "pending") setDateFromPending(value);
-                  else if (view === "completed") setDateFromCompleted(value);
+                  if (view === "completed") setDateFromCompleted(value);
                   else if (view === "hold") setDateFromHold(value);
                   else setDateFromSelfTransfer(value);
                 }}
@@ -1383,14 +1622,27 @@ export function Transactions() {
                 id="dateToCompleted"
                 value={dateTo}
                 onChange={(value) => {
-                  if (view === "pending") setDateToPending(value);
-                  else if (view === "completed") setDateToCompleted(value);
+                  if (view === "completed") setDateToCompleted(value);
                   else if (view === "hold") setDateToHold(value);
                   else setDateToSelfTransfer(value);
                 }}
                 placeholder="DD/MM/YYYY"
                 className="h-9 text-sm"
               />
+            </div>
+            <div>
+              <Label>Actions</Label>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handlePrint}
+                disabled={filteredTransactions.length === 0}
+                className="h-9 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white w-full"
+                title="Print/Save as PDF"
+              >
+                <Printer className="h-4 w-4" />
+                Print PDF
+              </Button>
             </div>
               <div>
                 <Label>Sort by Date</Label>
@@ -1421,10 +1673,7 @@ export function Transactions() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  if (view === "pending") {
-                    setDateFromPending("");
-                    setDateToPending("");
-                  } else if (view === "completed") {
+                  if (view === "completed") {
                     setDateFromCompleted("");
                     setDateToCompleted("");
                   } else if (view === "hold") {
@@ -1748,19 +1997,28 @@ export function Transactions() {
                                   <>
                                     <span>{transaction.partyName}</span>
                                     {(() => {
-                                        const suggested = partySuggestions[transaction.id] || null;
-                                      if (suggested && suggested !== transaction.partyName) {
-                                        return (
-                                          <button
-                                            type="button"
-                                            onClick={() => handleApplySuggestion(transaction.id, transaction.partyName, suggested)}
-                                            className="flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-                                            title={`Suggested: ${suggested}`}
-                                          >
-                                            <Sparkles className="h-3 w-3" />
-                                            → {suggested}
-                                          </button>
-                                        );
+                                        const suggestions = partySuggestions[transaction.id];
+                                      if (suggestions && Array.isArray(suggestions) && suggestions.length > 0) {
+                                        // Show multiple suggestions that are different from current party name
+                                        const differentSuggestions = suggestions.filter(s => s !== transaction.partyName);
+                                        if (differentSuggestions.length > 0) {
+                                          return (
+                                            <div className="flex items-center gap-1 flex-wrap">
+                                              {differentSuggestions.slice(0, 3).map((suggested, idx) => (
+                                                <button
+                                                  key={idx}
+                                                  type="button"
+                                                  onClick={() => handleApplySuggestion(transaction.id, transaction.partyName, suggested)}
+                                                  className="flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                                                  title={`Suggested: ${suggested}`}
+                                                >
+                                                  <Sparkles className="h-3 w-3" />
+                                                  → {suggested}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          );
+                                        }
                                       }
                                       return (
                                         <button
@@ -1775,20 +2033,26 @@ export function Transactions() {
                                     })()}
                                   </>
                                 ) : (
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                       {(() => {
-                                        const suggested = partySuggestions[transaction.id] || null;
-                                        if (suggested) {
+                                        const suggestions = partySuggestions[transaction.id];
+                                        if (suggestions && Array.isArray(suggestions) && suggestions.length > 0) {
+                                          // Show up to 3 suggestions
                                           return (
-                                            <button
-                                              type="button"
-                                              onClick={() => handleApplySuggestion(transaction.id, "", suggested)}
-                                              className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-                                              title={`Suggested: ${suggested}`}
-                                            >
-                                              <Sparkles className="h-3 w-3" />
-                                              {suggested}
-                                            </button>
+                                            <>
+                                              {suggestions.slice(0, 3).map((suggested, idx) => (
+                                                <button
+                                                  key={idx}
+                                                  type="button"
+                                                  onClick={() => handleApplySuggestion(transaction.id, "", suggested)}
+                                                  className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                                                  title={`Suggested: ${suggested}`}
+                                                >
+                                                  <Sparkles className="h-3 w-3" />
+                                                  {suggested}
+                                                </button>
+                                              ))}
+                                            </>
                                           );
                                         }
                                         return (
@@ -2134,27 +2398,33 @@ export function Transactions() {
               <Label htmlFor="modal-party-name" className="text-sm font-semibold">
                 Party Name <span className="text-muted-foreground text-xs">(Optional for Hold/Self Transfer)</span>
               </Label>
-              <div className="flex items-center gap-3">
-                <Input
-                  id="modal-party-name"
-                  value={modalPartyName}
-                  onChange={(e) => setModalPartyName(e.target.value)}
-                  placeholder="Enter party name"
-                  className="flex-1 h-12 input-modern"
-                />
-                {modalSuggestion && modalSuggestion !== modalPartyName && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setModalPartyName(modalSuggestion)}
-                    className="flex-shrink-0"
-                    title={`Use suggested: ${modalSuggestion}`}
-                  >
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    Use: {modalSuggestion}
-                  </Button>
-                )}
-              </div>
+              <Input
+                id="modal-party-name"
+                value={modalPartyName}
+                onChange={(e) => setModalPartyName(e.target.value)}
+                placeholder="Enter party name"
+                className="w-full h-12 input-modern"
+              />
+              {modalSuggestions.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {modalSuggestions
+                    .filter(s => s !== modalPartyName)
+                    .slice(0, 3)
+                    .map((suggestion, idx) => (
+                      <Button
+                        key={idx}
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setModalPartyName(suggestion)}
+                        className="flex-shrink-0"
+                        title={`Use suggested: ${suggestion}`}
+                      >
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        Use: {suggestion}
+                      </Button>
+                    ))}
+                </div>
+              )}
             </div>
 
             {/* Vyapar Reference Number Input */}

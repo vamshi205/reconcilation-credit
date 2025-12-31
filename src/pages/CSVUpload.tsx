@@ -11,6 +11,71 @@ import { saveTransactionsToSheets, isGoogleSheetsConfigured, getGoogleSheetsURL,
 import { generateId, formatDate } from "../lib/utils";
 import { Upload, FileText, CheckCircle, XCircle, Sparkles } from "lucide-react";
 
+// Storage key for tracking uploaded files
+const UPLOADED_FILES_KEY = "uploaded_files_tracker";
+
+interface UploadedFileInfo {
+  name: string;
+  size: number;
+  lastModified: number;
+  uploadedAt: string;
+}
+
+// Helper functions to manage uploaded files list
+const getUploadedFiles = (): UploadedFileInfo[] => {
+  try {
+    const data = localStorage.getItem(UPLOADED_FILES_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+};
+
+const addUploadedFile = (file: File): void => {
+  try {
+    const uploadedFiles = getUploadedFiles();
+    const fileInfo: UploadedFileInfo = {
+      name: file.name,
+      size: file.size,
+      lastModified: file.lastModified,
+      uploadedAt: new Date().toISOString(),
+    };
+    
+    // Check if file already exists (by name + size + lastModified)
+    const exists = uploadedFiles.some(
+      (f) =>
+        f.name === fileInfo.name &&
+        f.size === fileInfo.size &&
+        f.lastModified === fileInfo.lastModified
+    );
+    
+    if (!exists) {
+      uploadedFiles.push(fileInfo);
+      // Keep only last 100 uploaded files to prevent localStorage bloat
+      if (uploadedFiles.length > 100) {
+        uploadedFiles.shift();
+      }
+      localStorage.setItem(UPLOADED_FILES_KEY, JSON.stringify(uploadedFiles));
+    }
+  } catch (error) {
+    console.error("Error saving uploaded file info:", error);
+  }
+};
+
+const isFileAlreadyUploaded = (file: File): boolean => {
+  try {
+    const uploadedFiles = getUploadedFiles();
+    return uploadedFiles.some(
+      (f) =>
+        f.name === file.name &&
+        f.size === file.size &&
+        f.lastModified === file.lastModified
+    );
+  } catch {
+    return false;
+  }
+};
+
 export function CSVUpload() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -33,6 +98,25 @@ export function CSVUpload() {
       !fileName.endsWith(".xls")
     ) {
       setError("Please select a CSV or Excel file (.csv, .xls, .xlsx)");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+
+    // Check if file has already been uploaded
+    if (isFileAlreadyUploaded(selectedFile)) {
+      setError(
+        `This file has already been uploaded before.\n\n` +
+        `File: ${selectedFile.name}\n` +
+        `Size: ${(selectedFile.size / 1024).toFixed(2)} KB\n\n` +
+        `Please select a different file to avoid duplicate transactions.`
+      );
+      setFile(null);
+      setParsedTransactions([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       return;
     }
 
@@ -193,6 +277,11 @@ export function CSVUpload() {
         }
       } else {
         alert(`Successfully imported ${parsedTransactions.length} deposit transactions!`);
+      }
+
+      // Mark file as uploaded after successful save
+      if (file) {
+        addUploadedFile(file);
       }
 
       setFile(null);

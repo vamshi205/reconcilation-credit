@@ -297,9 +297,14 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
  * Adjust column order based on your Google Sheet structure
  */
 function formatTransactionAsRow(transaction: Transaction): (string | number)[] {
+  // CRITICAL: Date should ONLY be set from CSV upload, NEVER modified
+  // This function just formats the date for display - it does NOT modify the date value
+  const dateValue = transaction.date; // Use original date value
+  console.log('📅 Formatting transaction date (NOT modifying):', dateValue, 'for transaction:', transaction.id);
+  
   return [
     transaction.id, // Transaction ID (unique key) - FIRST COLUMN
-    formatDate(transaction.date), // Date
+    formatDate(dateValue), // Date - formatted for display, but original value preserved
     transaction.description || '', // Narration/Description
     transaction.referenceNumber || '', // Bank Ref No.
     transaction.amount, // Amount
@@ -600,6 +605,98 @@ export async function fetchPartyMappingsFromSheets(): Promise<PartyNameMapping[]
     console.error('Error fetching party mappings from Google Sheets:', error);
     return [];
   }
+}
+
+/**
+ * Fetch all parties from Google Sheets (from a separate Parties sheet)
+ * Expected format: Each row contains a party name
+ */
+export async function fetchPartiesFromSheets(): Promise<string[]> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    return [];
+  }
+
+  try {
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getParties`, {
+      method: 'GET',
+    });
+
+    const responseText = await response.text();
+    
+    if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
+      console.error('Google Apps Script requires authorization.');
+      return [];
+    }
+
+    const result = JSON.parse(responseText);
+    
+    if (result.success && result.data) {
+      // Extract party names from rows (assuming first column contains party name)
+      const parties = result.data
+        .map((row: any[]) => String(row[0] || '').trim())
+        .filter((party: string) => party.length > 0);
+      
+      return parties;
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Error fetching parties from Google Sheets:', error);
+    return [];
+  }
+}
+
+/**
+ * Match a party name word-by-word in narration
+ * Returns a score (0-1) indicating how well the party matches the narration
+ * 1.0 = all words match, 0.5 = half words match, 0 = no match
+ */
+export function scorePartyMatch(narration: string, partyName: string): number {
+  if (!narration || !partyName) return 0;
+  
+  const narrationLower = narration.toLowerCase();
+  const partyLower = partyName.toLowerCase();
+  
+  // Split party name into words (filter out very short words and common words)
+  const partyWords = partyLower
+    .split(/\s+/)
+    .filter(word => word.length > 2) // Only consider words longer than 2 characters
+    .filter(word => !/^(pvt|ltd|limited|private|inc|incorporated|llp|llc|and|the|of|for|to|in|on|at|by|with|from)$/i.test(word)); // Filter common business words
+  
+  // If no significant words, return 0
+  if (partyWords.length === 0) return 0;
+  
+  // Count how many words match
+  const matchingWords = partyWords.filter(word => narrationLower.includes(word));
+  const matchRatio = matchingWords.length / partyWords.length;
+  
+  // Require at least 50% of words to match
+  if (matchRatio < 0.5) return 0;
+  
+  // Return score (0.5 to 1.0 based on match ratio)
+  return matchRatio;
+}
+
+/**
+ * Find matching parties from parties list in narration (word-by-word matching)
+ * Returns top 2-3 matches sorted by relevance score
+ */
+export function findMatchingParties(narration: string, parties: string[], maxMatches: number = 3): string[] {
+  if (!narration || parties.length === 0) return [];
+  
+  // Score all parties
+  const scoredParties = parties
+    .map(party => ({
+      party,
+      score: scorePartyMatch(narration, party)
+    }))
+    .filter(item => item.score > 0) // Only keep parties with score > 0
+    .sort((a, b) => b.score - a.score) // Sort by score (highest first)
+    .slice(0, maxMatches) // Take top matches
+    .map(item => item.party) // Extract party names
+    .filter(party => party && party.trim().length > 0); // Filter out blank/empty party names
+  
+  return scoredParties;
 }
 
 /**
