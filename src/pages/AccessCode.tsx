@@ -44,6 +44,13 @@ export function AccessCode() {
           body: JSON.stringify({ accessCode }),
         });
 
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          // Not JSON response - might be HTML error page
+          throw new Error('Server returned non-JSON response');
+        }
+
         const result = await response.json();
 
         if (response.ok && result.success) {
@@ -59,6 +66,15 @@ export function AccessCode() {
           return;
         }
       } catch (apiError) {
+        // Log error for debugging
+        console.error('API error:', apiError);
+        
+        // If in production and API fails, show helpful error
+        if (import.meta.env.PROD) {
+          setError("Unable to verify access code. Please check your deployment or try again.");
+          setIsLoading(false);
+          return;
+        }
         // If serverless function doesn't exist or fails, fall back to client-side
         // This allows development without serverless function
         const validAccessCode = import.meta.env.VITE_ACCESS_CODE || '';
