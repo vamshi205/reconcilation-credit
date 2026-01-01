@@ -21,6 +21,17 @@ export function formatDate(date: string | Date): string {
     if (date.match(/^\d{1,2}\s+\w{3}\s+\d{4}$/)) {
       return date;
     }
+    // If it's a full ISO timestamp (YYYY-MM-DDTHH:mm:ss.sssZ), extract date part only
+    const isoTimestampMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+    if (isoTimestampMatch) {
+      const year = parseInt(isoTimestampMatch[1], 10);
+      const month = parseInt(isoTimestampMatch[2], 10);
+      const day = parseInt(isoTimestampMatch[3], 10);
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        return `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
+      }
+    }
     // If it's an ISO date string (YYYY-MM-DD), convert to "DD MMM YYYY"
     if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
       const [year, month, day] = date.split('-').map(Number);
@@ -28,6 +39,19 @@ export function formatDate(date: string | Date): string {
       if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
         return `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
       }
+    }
+    // For other formats, try to parse as date and extract components
+    try {
+      const parsedDate = new Date(date);
+      if (!isNaN(parsedDate.getTime())) {
+        const day = String(parsedDate.getDate()).padStart(2, '0');
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const month = monthNames[parsedDate.getMonth()];
+        const year = parsedDate.getFullYear();
+        return `${day} ${month} ${year}`;
+      }
+    } catch (e) {
+      // Ignore parse errors
     }
     // For other formats, return as-is
     return date;
