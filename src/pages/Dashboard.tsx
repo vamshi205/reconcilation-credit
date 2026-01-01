@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { StorageService, DashboardStats } from "../services/storageService";
 import { fetchTransactionsFromSheets, isGoogleSheetsConfigured } from "../services/googleSheetsService";
@@ -10,6 +11,7 @@ import { Label } from "../components/ui/Label";
 import { Button } from "../components/ui/Button";
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats>({
     totalDepositAmount: 0,
     pendingAmount: 0,
@@ -31,18 +33,25 @@ export function Dashboard() {
     const loadTransactions = async () => {
       if (isGoogleSheetsConfigured()) {
         try {
+          console.log('Loading transactions from Google Sheets...');
           const sheetsTransactions = await fetchTransactionsFromSheets();
+          console.log(`Fetched ${sheetsTransactions.length} transactions from Google Sheets`);
           // Only show deposits (credits)
           const creditTransactions = sheetsTransactions.filter((t) => t.type === "credit");
+          console.log(`Filtered to ${creditTransactions.length} credit transactions`);
           setTransactions(creditTransactions);
         } catch (error) {
           console.error('Error fetching transactions for dashboard:', error);
+          // Show error message to user
+          alert(`Failed to load transactions from Google Sheets.\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease check:\n1. Google Sheets URL is configured\n2. Google Apps Script is authorized\n3. Check browser console for details`);
           setTransactions([]);
         }
       } else {
+        console.warn('Google Sheets not configured. Cannot load transactions.');
         // Fallback to local storage if Google Sheets not configured
         const localTransactions = StorageService.getTransactions();
         const creditTransactions = localTransactions.filter((t) => t.type === "credit");
+        console.log(`Loaded ${creditTransactions.length} transactions from local storage`);
         setTransactions(creditTransactions);
       }
     };
@@ -173,6 +182,8 @@ export function Dashboard() {
     },
   ];
 
+  const isConfigured = isGoogleSheetsConfigured();
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -184,6 +195,59 @@ export function Dashboard() {
           <p className="text-muted-foreground mt-2">Overview of deposit transactions and Vyapar sync status</p>
         </div>
       </div>
+
+      {/* Warning if Google Sheets not configured */}
+      {!isConfigured && (
+        <Card className="glass-card border-2 border-orange-500/60 bg-orange-50/50 animate-fade-in">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="h-6 w-6 text-orange-600 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-orange-900 mb-2">Google Sheets Not Configured</h3>
+                <p className="text-sm text-orange-800 mb-3">
+                  Transactions are not loading because Google Sheets is not configured. Please set up your Google Sheets integration.
+                </p>
+                <p className="text-xs text-orange-700">
+                  <strong>To fix:</strong> Set <code className="bg-orange-100 px-1 rounded">VITE_GOOGLE_SHEETS_APPS_SCRIPT_URL</code> in your Vercel environment variables and redeploy.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Info if no transactions */}
+      {isConfigured && transactions.length === 0 && (
+        <Card className="glass-card border-2 border-blue-500/60 bg-blue-50/50 animate-fade-in">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="h-6 w-6 text-blue-600 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-blue-900 mb-2">No Transactions Found</h3>
+                <p className="text-sm text-blue-800 mb-3">
+                  Your Google Sheet appears to be empty. Upload a CSV file or add transactions manually to get started.
+                </p>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => navigate('/csv-upload')}
+                  >
+                    Upload CSV
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => navigate('/manual-entry')}
+                  >
+                    Manual Entry
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Year Filter */}
       <Card className="glass-card border-2 border-border/60 animate-fade-in">

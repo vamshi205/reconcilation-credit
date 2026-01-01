@@ -14,11 +14,23 @@ export function formatCurrency(amount: number): string {
 }
 
 export function formatDate(date: string | Date): string {
-  const d = typeof date === "string" ? new Date(date) : date;
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`;
+  // NO TIMEZONE CONVERSION - treat as date-only string
+  if (typeof date === "string") {
+    // If it's an ISO date string (YYYY-MM-DD), extract components directly
+    if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = date.split('-').map(Number);
+      return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+    }
+    // For other string formats, try to parse as date components
+    // But avoid Date constructor to prevent timezone issues
+    return date; // Return as-is if not ISO format
+  } else {
+    // If it's a Date object, extract components directly
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
 }
 
 /**
@@ -26,20 +38,26 @@ export function formatDate(date: string | Date): string {
  * This is the format expected by Google Sheets when inserting dates
  */
 export function formatDateForSheets(date: string | Date): string {
-  const d = typeof date === "string" ? new Date(date) : date;
-  
-  // Check if date is valid
-  if (isNaN(d.getTime())) {
-    console.warn('Invalid date provided to formatDateForSheets:', date);
-    return '';
+  // NO TIMEZONE CONVERSION - treat as date-only string
+  if (typeof date === "string") {
+    // If it's an ISO date string (YYYY-MM-DD), extract components directly
+    if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = date.split('-').map(Number);
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        return `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
+      }
+    }
+    // For other formats, return as-is or try to parse
+    return date;
+  } else {
+    // If it's a Date object, extract components directly
+    const day = String(date.getDate()).padStart(2, '0');
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = monthNames[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
   }
-  
-  const day = String(d.getDate()).padStart(2, '0');
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = monthNames[d.getMonth()];
-  const year = d.getFullYear();
-  
-  return `${day} ${month} ${year}`;
 }
 
 /**
@@ -47,12 +65,15 @@ export function formatDateForSheets(date: string | Date): string {
  */
 export function isoToDDMMYYYY(isoDate: string): string {
   if (!isoDate) return '';
-  const date = new Date(isoDate);
-  if (isNaN(date.getTime())) return '';
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
-  return `${day}/${month}/${year}`;
+  // NO TIMEZONE CONVERSION - extract components directly from ISO string
+  if (isoDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const [year, month, day] = isoDate.split('-').map(Number);
+    // Validate date components
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+    }
+  }
+  return isoDate; // Return as-is if not valid ISO format
 }
 
 /**

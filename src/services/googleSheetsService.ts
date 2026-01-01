@@ -356,22 +356,37 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
       const transactions = result.data.map((row: any[]) => {
         // Column order: [ID, Date, Narration, Bank Ref No., Amount, Party Name, Category, Type, Added to Vyapar, Vyapar Ref No., Hold, Notes, Created At, Updated At]
         
-        // Parse date - handle both string and Date object from Google Sheets
+        // Parse date - NO TIMEZONE CONVERSION - treat as date-only string
         let dateStr = row[1];
         if (dateStr instanceof Date) {
-          dateStr = dateStr.toISOString().split('T')[0];
+          // Extract date components directly without timezone conversion
+          const year = dateStr.getFullYear();
+          const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+          const day = String(dateStr.getDate()).padStart(2, '0');
+          dateStr = `${year}-${month}-${day}`;
         } else if (typeof dateStr === 'string') {
-          // If it's already in ISO format or DD MMM YYYY format, keep it
-          // Otherwise try to parse it
-          if (!dateStr.match(/^\d{4}-\d{2}-\d{2}$/) && !dateStr.match(/^\d{2} \w{3} \d{4}$/)) {
-            try {
-              const parsedDate = new Date(dateStr);
-              if (!isNaN(parsedDate.getTime())) {
-                dateStr = parsedDate.toISOString().split('T')[0];
-              }
-            } catch (e) {
-              // Keep original if parsing fails
+          // Handle DD MMM YYYY format (e.g., "02 Jan 2025") - parse directly without Date object
+          const ddmmyyyyMatch = dateStr.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/);
+          if (ddmmyyyyMatch) {
+            const day = parseInt(ddmmyyyyMatch[1], 10);
+            const monthName = ddmmyyyyMatch[2];
+            const year = parseInt(ddmmyyyyMatch[3], 10);
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const monthIndex = monthNames.indexOf(monthName);
+            if (monthIndex !== -1 && day >= 1 && day <= 31) {
+              // Convert directly to YYYY-MM-DD without any Date object or timezone conversion
+              dateStr = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            } else {
+              // Invalid format, try to keep as-is or use fallback
+              dateStr = dateStr;
             }
+          } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            // Already in ISO format (YYYY-MM-DD), keep it as-is
+            dateStr = dateStr;
+          } else {
+            // For other formats, try to extract date components if possible
+            // But avoid using Date constructor which can cause timezone issues
+            dateStr = dateStr; // Keep original string
           }
         }
         
