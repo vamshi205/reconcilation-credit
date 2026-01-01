@@ -299,18 +299,8 @@ export class BankCSVParser {
       return null; // Skip withdrawals and zero amounts
     }
 
-    // Find narration column (flexible matching)
-    let narration = "";
-    for (const key of rowKeys) {
-      const keyLower = key.toLowerCase().trim();
-      if (keyLower.includes("narration") || keyLower.includes("description")) {
-        narration = String(row[key] || "");
-        break;
-      }
-    }
-    if (!narration) {
-      narration = String(rowLower["narration"] || rowLower["description"] || "");
-    }
+    // Narration is already found above (used for summary row check)
+    // No need to find it again
 
     // Find reference number column (flexible matching)
     let referenceNumber = "";
