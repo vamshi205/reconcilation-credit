@@ -192,6 +192,37 @@ export class BankCSVParser {
       rowKeys.map((k) => [k.toLowerCase().trim(), row[k]])
     );
 
+    // Find narration column first to check for summary/total rows
+    let narration = "";
+    for (const key of rowKeys) {
+      const keyLower = key.toLowerCase().trim();
+      if (keyLower.includes("narration") || keyLower.includes("description")) {
+        narration = String(row[key] || "").trim();
+        break;
+      }
+    }
+    if (!narration) {
+      narration = String(rowLower["narration"] || rowLower["description"] || "").trim();
+    }
+
+    // Filter out summary/total rows
+    const narrationLower = narration.toLowerCase();
+    const summaryKeywords = [
+      "total", "summary", "grand total", "opening balance", 
+      "closing balance", "balance", "total deposit", "total withdrawal",
+      "total credit", "total debit", "net balance", "balance brought forward",
+      "balance carried forward", "opening", "closing"
+    ];
+    
+    const isSummaryRow = summaryKeywords.some(keyword => 
+      narrationLower.includes(keyword) && narrationLower.length < 50 // Short descriptions are likely summary rows
+    );
+    
+    if (isSummaryRow) {
+      console.log(`Skipping summary row ${index + 1}: "${narration}"`);
+      return null;
+    }
+
     // Find date column (flexible matching)
     let dateStr = "";
     for (const key of rowKeys) {
@@ -215,7 +246,7 @@ export class BankCSVParser {
       );
     }
 
-    if (!dateStr || dateStr === "undefined" || dateStr === "null") {
+    if (!dateStr || dateStr === "undefined" || dateStr === "null" || dateStr.trim() === "") {
       if (index < 3) {
         // Only log first few rows to avoid spam
         console.warn(`Row ${index + 1}: No date found. Available columns:`, rowKeys);

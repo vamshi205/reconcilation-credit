@@ -1740,7 +1740,7 @@ export function Transactions() {
                             key={transaction.id}
                             className="border-b border-slate-300 bg-card hover:bg-muted/50 transition-colors"
                           >
-                            <td className="p-3 text-sm border-r border-slate-300">{formatDate(transaction.date)}</td>
+                            <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap">{formatDate(transaction.date)}</td>
                             <td className="p-3 text-sm border-r border-slate-300">{transaction.description}</td>
                             <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
                               {transaction.referenceNumber || "-"}
@@ -1926,7 +1926,7 @@ export function Transactions() {
                             title={transaction.hold ? "Cannot modify - transaction is on hold" : transaction.selfTransfer ? "Cannot modify - transaction is a self transfer" : ""}
                           />
                         </td>
-                        <td className="p-3 text-sm border-r border-slate-300">{formatDate(transaction.date)}</td>
+                        <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap">{formatDate(transaction.date)}</td>
                         <td className="p-3 text-sm border-r border-slate-300">{transaction.description}</td>
                         <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
                           {transaction.referenceNumber || "-"}
@@ -2370,7 +2370,7 @@ export function Transactions() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Date</Label>
-                  <p className="text-base font-bold text-slate-900">{formatDate(editingTransaction.date)}</p>
+                  <p className="text-base font-bold text-slate-900 whitespace-nowrap">{formatDate(editingTransaction.date)}</p>
                 </div>
                 <div>
                   <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Amount</Label>

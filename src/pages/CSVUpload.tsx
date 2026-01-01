@@ -537,7 +537,7 @@ export function CSVUpload() {
                         }
                         return (
                           <tr key={idx} className="border-t">
-                            <td className="p-2">{formatDate(t.date)}</td>
+                            <td className="p-2 whitespace-nowrap">{formatDate(t.date)}</td>
                             <td className="p-2">
                               <span className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
                                 Deposit

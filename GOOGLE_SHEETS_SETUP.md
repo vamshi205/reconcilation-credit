@@ -260,8 +260,51 @@ function doGet(e) {
       // Get all data rows (skip header)
       const dataRows = values.slice(1);
       
-      Logger.log('Returning ' + dataRows.length + ' transactions');
-      return ContentService.createTextOutput(JSON.stringify({ success: true, data: dataRows }))
+      // Format dates as strings to avoid timezone issues
+      // Date column is index 1 (second column, 0-indexed)
+      const formattedRows = dataRows.map(function(row) {
+        const formattedRow = row.slice(); // Copy the row
+        
+        // Format date column (index 1) as "DD MMM YYYY" string
+        if (formattedRow[1] instanceof Date) {
+          const date = formattedRow[1];
+          var day = date.getDate();
+          day = day < 10 ? '0' + day : String(day);
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const month = monthNames[date.getMonth()];
+          const year = date.getFullYear();
+          formattedRow[1] = day + ' ' + month + ' ' + year; // "DD MMM YYYY" format
+        } else if (formattedRow[1]) {
+          // If it's already a string, keep it as-is
+          formattedRow[1] = String(formattedRow[1]);
+        }
+        
+        // Format Created At (index 13) and Updated At (index 14) if they exist
+        if (formattedRow[13] instanceof Date) {
+          const date = formattedRow[13];
+          var day = date.getDate();
+          day = day < 10 ? '0' + day : String(day);
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const month = monthNames[date.getMonth()];
+          const year = date.getFullYear();
+          formattedRow[13] = day + ' ' + month + ' ' + year;
+        }
+        
+        if (formattedRow[14] instanceof Date) {
+          const date = formattedRow[14];
+          var day = date.getDate();
+          day = day < 10 ? '0' + day : String(day);
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const month = monthNames[date.getMonth()];
+          const year = date.getFullYear();
+          formattedRow[14] = day + ' ' + month + ' ' + year;
+        }
+        
+        return formattedRow;
+      });
+      
+      Logger.log('Returning ' + formattedRows.length + ' transactions with formatted dates');
+      return ContentService.createTextOutput(JSON.stringify({ success: true, data: formattedRows }))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getPartyMappings') {
       // Fetch all party mappings from the PartyMappings sheet
