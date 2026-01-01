@@ -67,9 +67,6 @@ function App() {
             </AccessCodeProtected>
           }
         />
-        
-        {/* Redirect root to access code */}
-        <Route path="/" element={<Navigate to="/access" replace />} />
       </Routes>
     </Router>
   );
