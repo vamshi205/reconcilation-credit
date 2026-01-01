@@ -356,51 +356,27 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
       const transactions = result.data.map((row: any[]) => {
         // Column order: [ID, Date, Narration, Bank Ref No., Amount, Party Name, Category, Type, Added to Vyapar, Vyapar Ref No., Hold, Notes, Created At, Updated At]
         
-        // Parse date - Handle all formats and convert to "DD MMM YYYY" format to match Google Sheets
-        let dateStr = row[1];
-        if (dateStr instanceof Date) {
-          // Extract date components directly without timezone conversion
-          const year = dateStr.getFullYear();
-          const month = dateStr.getMonth() + 1;
-          const day = dateStr.getDate();
+        // Get date as STRING from Google Sheets - keep exactly as shown in Google Sheets
+        let dateStr = String(row[1] || '').trim();
+        
+        // If it's a Date object, convert to string first
+        if (row[1] instanceof Date) {
+          // Convert Date object to "DD MMM YYYY" format (what Google Sheets displays)
+          const year = row[1].getFullYear();
+          const month = row[1].getMonth() + 1;
+          const day = row[1].getDate();
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          // Store in "DD MMM YYYY" format to match Google Sheets
           dateStr = `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
-        } else if (typeof dateStr === 'string') {
-          // If already in "DD MMM YYYY" format (e.g., "02 Jan 2025"), keep it as-is
-          if (dateStr.match(/^\d{1,2}\s+\w{3}\s+\d{4}$/)) {
-            // Keep the original format from Google Sheets
-            dateStr = dateStr;
-          } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            // ISO date format (YYYY-MM-DD), convert to "DD MMM YYYY"
-            const [year, month, day] = dateStr.split('-').map(Number);
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-              dateStr = `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
-            }
-          } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}T/)) {
-            // ISO timestamp format (YYYY-MM-DDTHH:mm:ss.sssZ), extract date part and convert
-            const datePart = dateStr.split('T')[0];
-            const [year, month, day] = datePart.split('-').map(Number);
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-              dateStr = `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
-            }
-          } else {
-            // For other formats, try to parse and convert
-            try {
-              const parsedDate = new Date(dateStr);
-              if (!isNaN(parsedDate.getTime())) {
-                const year = parsedDate.getFullYear();
-                const month = parsedDate.getMonth() + 1;
-                const day = parsedDate.getDate();
-                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                dateStr = `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
-              }
-            } catch (e) {
-              // Keep original if parsing fails
-            }
-          }
+        }
+        
+        // If empty, use today's date in "DD MMM YYYY" format
+        if (!dateStr) {
+          const d = new Date();
+          const year = d.getFullYear();
+          const month = d.getMonth() + 1;
+          const day = d.getDate();
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          dateStr = `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
         }
         
         // Parse amount - handle both number and string

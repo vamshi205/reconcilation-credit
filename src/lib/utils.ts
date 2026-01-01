@@ -14,25 +14,22 @@ export function formatCurrency(amount: number): string {
 }
 
 export function formatDate(date: string | Date): string {
-  // Show dates in "DD MMM YYYY" format to match Google Sheets
-  // NO TIMEZONE CONVERSION - treat as date-only string
+  // SIMPLE: Date is stored as string from Google Sheets - show it as-is
   if (typeof date === "string") {
-    // If already in "DD MMM YYYY" format, return as-is
+    // If it's already in "DD MMM YYYY" format (what Google Sheets shows), return as-is
     if (date.match(/^\d{1,2}\s+\w{3}\s+\d{4}$/)) {
       return date;
     }
-    // If it's a full ISO timestamp (YYYY-MM-DDTHH:mm:ss.sssZ), extract date part only
-    const isoTimestampMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})T/);
-    if (isoTimestampMatch) {
-      const year = parseInt(isoTimestampMatch[1], 10);
-      const month = parseInt(isoTimestampMatch[2], 10);
-      const day = parseInt(isoTimestampMatch[3], 10);
+    // If it's an ISO timestamp (from old data or other sources), convert to "DD MMM YYYY"
+    if (date.match(/^\d{4}-\d{2}-\d{2}T/)) {
+      const datePart = date.split('T')[0];
+      const [year, month, day] = datePart.split('-').map(Number);
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
         return `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
       }
     }
-    // If it's an ISO date string (YYYY-MM-DD), convert to "DD MMM YYYY"
+    // If it's ISO date (YYYY-MM-DD), convert to "DD MMM YYYY"
     if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
       const [year, month, day] = date.split('-').map(Number);
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -40,23 +37,10 @@ export function formatDate(date: string | Date): string {
         return `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
       }
     }
-    // For other formats, try to parse as date and extract components
-    try {
-      const parsedDate = new Date(date);
-      if (!isNaN(parsedDate.getTime())) {
-        const day = String(parsedDate.getDate()).padStart(2, '0');
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const month = monthNames[parsedDate.getMonth()];
-        const year = parsedDate.getFullYear();
-        return `${day} ${month} ${year}`;
-      }
-    } catch (e) {
-      // Ignore parse errors
-    }
-    // For other formats, return as-is
+    // For any other format, return as-is (this is what Google Sheets shows)
     return date;
   } else {
-    // If it's a Date object, extract components directly
+    // If it's a Date object (shouldn't happen, but handle it), convert to "DD MMM YYYY"
     const day = String(date.getDate()).padStart(2, '0');
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const month = monthNames[date.getMonth()];
