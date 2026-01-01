@@ -356,37 +356,26 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
       const transactions = result.data.map((row: any[]) => {
         // Column order: [ID, Date, Narration, Bank Ref No., Amount, Party Name, Category, Type, Added to Vyapar, Vyapar Ref No., Hold, Notes, Created At, Updated At]
         
-        // Parse date - NO TIMEZONE CONVERSION - treat as date-only string
+        // Parse date - Keep Google Sheets format "DD MMM YYYY" as-is, NO TIMEZONE CONVERSION
         let dateStr = row[1];
         if (dateStr instanceof Date) {
           // Extract date components directly without timezone conversion
           const year = dateStr.getFullYear();
           const month = String(dateStr.getMonth() + 1).padStart(2, '0');
           const day = String(dateStr.getDate()).padStart(2, '0');
+          // Store as ISO for internal use, but will display as "DD MMM YYYY"
           dateStr = `${year}-${month}-${day}`;
         } else if (typeof dateStr === 'string') {
-          // Handle DD MMM YYYY format (e.g., "02 Jan 2025") - parse directly without Date object
-          const ddmmyyyyMatch = dateStr.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/);
-          if (ddmmyyyyMatch) {
-            const day = parseInt(ddmmyyyyMatch[1], 10);
-            const monthName = ddmmyyyyMatch[2];
-            const year = parseInt(ddmmyyyyMatch[3], 10);
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const monthIndex = monthNames.indexOf(monthName);
-            if (monthIndex !== -1 && day >= 1 && day <= 31) {
-              // Convert directly to YYYY-MM-DD without any Date object or timezone conversion
-              dateStr = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            } else {
-              // Invalid format, try to keep as-is or use fallback
-              dateStr = dateStr;
-            }
+          // If already in "DD MMM YYYY" format (e.g., "02 Jan 2025"), keep it as-is
+          if (dateStr.match(/^\d{1,2}\s+\w{3}\s+\d{4}$/)) {
+            // Keep the original format from Google Sheets
+            dateStr = dateStr;
           } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
             // Already in ISO format (YYYY-MM-DD), keep it as-is
             dateStr = dateStr;
           } else {
-            // For other formats, try to extract date components if possible
-            // But avoid using Date constructor which can cause timezone issues
-            dateStr = dateStr; // Keep original string
+            // For other formats, keep as-is
+            dateStr = dateStr;
           }
         }
         
@@ -428,7 +417,7 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
         
         return {
           id: String(row[0] || '').trim() || '',
-          date: dateStr || new Date().toISOString().split('T')[0],
+          date: dateStr || formatDateForSheets(new Date()),
           description: String(row[2] || '').trim(),
           referenceNumber: refNumber,
           amount: amount,
@@ -440,8 +429,8 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
           hold: row[10] === 'Yes' || row[10] === true || row[10] === 'true',
           selfTransfer: row[11] === 'Yes' || row[11] === true || row[11] === 'true',
           notes: notesValue,
-          createdAt: row[13] || new Date().toISOString(),
-          updatedAt: row[14] || new Date().toISOString(),
+          createdAt: row[13] || formatDateForSheets(new Date()),
+          updatedAt: row[14] || formatDateForSheets(new Date()),
         } as Transaction;
       });
 
