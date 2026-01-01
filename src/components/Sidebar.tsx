@@ -1,7 +1,8 @@
-import { Link, useLocation } from "react-router-dom";
-import { Home, Plus, Upload, List, CheckSquare, Users, Menu, X, Sparkles } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Home, Plus, Upload, List, CheckSquare, Users, Menu, X, Sparkles, LogOut } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../lib/utils";
+import { AuthService } from "../services/authService";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
@@ -15,7 +16,13 @@ const navigation = [
 
 export function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const handleLogout = () => {
+    AuthService.logout();
+    navigate("/login", { replace: true });
+  };
 
   return (
     <>
@@ -71,6 +78,17 @@ export function Sidebar() {
               );
             })}
           </nav>
+
+          {/* Logout button */}
+          <div className="p-4 border-t border-sidebar-border">
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-md transition-all duration-200 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            >
+              <LogOut className="h-5 w-5" />
+              <span className="font-medium">Logout</span>
+            </button>
+          </div>
         </div>
       </aside>
     </>

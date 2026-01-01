@@ -1,0 +1,32 @@
+// Example: Supabase Authentication Integration
+// This is a template - install Supabase first: npm install @supabase/supabase-js
+
+/*
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+export class SupabaseAuth {
+  static async login(email: string, password: string) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+    
+    if (error) throw error
+    return data
+  }
+
+  static async logout() {
+    await supabase.auth.signOut()
+  }
+
+  static isAuthenticated() {
+    return supabase.auth.getSession().then(({ data }) => !!data.session)
+  }
+}
+*/
+

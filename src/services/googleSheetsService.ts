@@ -3,7 +3,8 @@
 
 // Option 1: Using Google Apps Script (Recommended - No API key needed)
 // You need to create a Google Apps Script web app first
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwaxqF-hd2tiQKukRnBqMD-Iir56Vpm0CWYL-70YHTXJoMpHTwf_GannYZO-xfrAipXOA/exec'; // Add your Google Apps Script web app URL here
+// Get URL from environment variable for security
+const APPS_SCRIPT_URL = import.meta.env.VITE_GOOGLE_SHEETS_APPS_SCRIPT_URL || '';
 
 // Export URL for error messages
 export function getGoogleSheetsURL(): string {
@@ -11,10 +12,10 @@ export function getGoogleSheetsURL(): string {
 }
 
 // Option 2: Using Google Sheets API (Requires API key and OAuth)
-const API_KEY = ''; // Add your Google Sheets API key here
+const API_KEY = import.meta.env.VITE_GOOGLE_SHEETS_API_KEY || '';
 
 import { Transaction } from '../types/transaction';
-import { formatDate } from '../lib/utils';
+import { formatDate, formatDateForSheets } from '../lib/utils';
 
 // Party Name Mapping interface (defined here to avoid circular dependency)
 export interface PartyNameMapping {
@@ -40,7 +41,7 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
     // Format transaction data as row array
     const rowData = formatTransactionAsRow(transaction);
 
-    console.log('Updating transaction in Google Sheets:', { id: transaction.id, url: APPS_SCRIPT_URL });
+    console.log('Updating transaction in Google Sheets:', { id: transaction.id });
 
     // Google Apps Script - use URL-encoded form data
     return new Promise((resolve) => {
@@ -150,7 +151,7 @@ export async function saveTransactionToSheets(transaction: Transaction): Promise
     // Format transaction data as row array
     const rowData = formatTransactionAsRow(transaction);
 
-    console.log('Sending transaction to Google Sheets:', { url: APPS_SCRIPT_URL, rowCount: rowData.length });
+    console.log('Sending transaction to Google Sheets:', { rowCount: rowData.length });
 
     // Google Apps Script - use URL-encoded form data which works better
     // Create form with proper encoding
@@ -298,13 +299,13 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
  */
 function formatTransactionAsRow(transaction: Transaction): (string | number)[] {
   // CRITICAL: Date should ONLY be set from CSV upload, NEVER modified
-  // This function just formats the date for display - it does NOT modify the date value
-  const dateValue = transaction.date; // Use original date value
-  console.log('📅 Formatting transaction date (NOT modifying):', dateValue, 'for transaction:', transaction.id);
+  // This function formats the date for Google Sheets in DD MMM YYYY format
+  const dateValue = transaction.date; // Use original date value (ISO format: YYYY-MM-DD)
+  console.log('📅 Formatting transaction date for Google Sheets:', dateValue, '->', formatDateForSheets(dateValue), 'for transaction:', transaction.id);
   
   return [
     transaction.id, // Transaction ID (unique key) - FIRST COLUMN
-    formatDate(dateValue), // Date - formatted for display, but original value preserved
+    formatDateForSheets(dateValue), // Date - formatted as DD MMM YYYY for Google Sheets
     transaction.description || '', // Narration/Description
     transaction.referenceNumber || '', // Bank Ref No.
     transaction.amount, // Amount
@@ -316,8 +317,8 @@ function formatTransactionAsRow(transaction: Transaction): (string | number)[] {
     transaction.hold ? 'Yes' : 'No', // Hold Status
     transaction.selfTransfer ? 'Yes' : 'No', // Self Transfer Status
     transaction.notes || '', // Notes
-    transaction.createdAt ? formatDate(transaction.createdAt) : '', // Created At
-    transaction.updatedAt ? formatDate(transaction.updatedAt) : '', // Updated At
+    transaction.createdAt ? formatDateForSheets(transaction.createdAt) : '', // Created At
+    transaction.updatedAt ? formatDateForSheets(transaction.updatedAt) : '', // Updated At
   ];
 }
 

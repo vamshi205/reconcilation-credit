@@ -22,6 +22,27 @@ export function formatDate(date: string | Date): string {
 }
 
 /**
+ * Format date as DD MMM YYYY (e.g., "15 Jan 2024") for Google Sheets
+ * This is the format expected by Google Sheets when inserting dates
+ */
+export function formatDateForSheets(date: string | Date): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  
+  // Check if date is valid
+  if (isNaN(d.getTime())) {
+    console.warn('Invalid date provided to formatDateForSheets:', date);
+    return '';
+  }
+  
+  const day = String(d.getDate()).padStart(2, '0');
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = monthNames[d.getMonth()];
+  const year = d.getFullYear();
+  
+  return `${day} ${month} ${year}`;
+}
+
+/**
  * Convert ISO date (YYYY-MM-DD) to DD/MM/YYYY format
  */
 export function isoToDDMMYYYY(isoDate: string): string {

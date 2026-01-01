@@ -1,0 +1,37 @@
+// Example: Firebase Authentication Integration
+// This is a template - install Firebase first: npm install firebase
+
+/*
+import { initializeApp } from 'firebase/app'
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  // ... other config
+}
+
+const app = initializeApp(firebaseConfig)
+export const auth = getAuth(app)
+
+export class FirebaseAuth {
+  static async login(email: string, password: string) {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password)
+    return userCredential.user
+  }
+
+  static async logout() {
+    await signOut(auth)
+  }
+
+  static isAuthenticated() {
+    return new Promise((resolve) => {
+      onAuthStateChanged(auth, (user) => {
+        resolve(!!user)
+      })
+    })
+  }
+}
+*/
+
