@@ -359,14 +359,53 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
         // Get date as STRING from Google Sheets - keep exactly as shown in Google Sheets
         let dateStr = String(row[1] || '').trim();
         
-        // If it's a Date object, convert to string first
-        if (row[1] instanceof Date) {
-          // Convert Date object to "DD MMM YYYY" format (what Google Sheets displays)
-          const year = row[1].getFullYear();
-          const month = row[1].getMonth() + 1;
-          const day = row[1].getDate();
+        // Helper function to add 1 day to a date
+        const addOneDay = (year: number, month: number, day: number): { year: number; month: number; day: number } => {
+          const date = new Date(year, month - 1, day);
+          date.setDate(date.getDate() + 1); // Add 1 day
+          return {
+            year: date.getFullYear(),
+            month: date.getMonth() + 1,
+            day: date.getDate()
+          };
+        };
+        
+        // If it's already in "DD MMM YYYY" format, parse it and add 1 day
+        if (dateStr.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/)) {
+          const match = dateStr.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/);
+          if (match) {
+            const day = parseInt(match[1], 10);
+            const monthName = match[2];
+            const year = parseInt(match[3], 10);
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const month = monthNames.indexOf(monthName) + 1;
+            if (month > 0) {
+              const adjusted = addOneDay(year, month, day);
+              dateStr = `${String(adjusted.day).padStart(2, '0')} ${monthNames[adjusted.month - 1]} ${adjusted.year}`;
+            }
+          }
+        } else if (row[1] instanceof Date) {
+          // If it's a Date object, add 1 day
+          const date = new Date(row[1]);
+          date.setDate(date.getDate() + 1);
+          const year = date.getFullYear();
+          const month = date.getMonth() + 1;
+          const day = date.getDate();
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           dateStr = `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
+        } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}T/)) {
+          // ISO timestamp string (e.g., "2025-01-03T18:30:00.000Z") - extract date part and add 1 day
+          const datePart = dateStr.split('T')[0];
+          const [year, month, day] = datePart.split('-').map(Number);
+          const adjusted = addOneDay(year, month, day);
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          dateStr = `${String(adjusted.day).padStart(2, '0')} ${monthNames[adjusted.month - 1]} ${adjusted.year}`;
+        } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          // ISO date string (YYYY-MM-DD) - add 1 day and convert to "DD MMM YYYY"
+          const [year, month, day] = dateStr.split('-').map(Number);
+          const adjusted = addOneDay(year, month, day);
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          dateStr = `${String(adjusted.day).padStart(2, '0')} ${monthNames[adjusted.month - 1]} ${adjusted.year}`;
         }
         
         // If empty, use today's date in "DD MMM YYYY" format
