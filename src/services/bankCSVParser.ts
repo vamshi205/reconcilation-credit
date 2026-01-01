@@ -88,9 +88,21 @@ export class BankCSVParser {
                 return;
               }
 
-              // Filter out separator rows (rows with mostly asterisks, dashes, or empty)
+              // Filter out separator rows, opening balance, and statement summary rows
               const validRows = (results.data as any[]).filter((row) => {
                 const values = Object.values(row);
+                const rowString = values.map(v => String(v || "").toLowerCase()).join(" ");
+                
+                // Check if row contains opening balance or statement summary keywords
+                const isSummaryRow = rowString.includes("opening balance") || 
+                                    rowString.includes("closing balance") ||
+                                    rowString.includes("statement summary") ||
+                                    rowString.includes("debits") && rowString.includes("credits");
+                
+                if (isSummaryRow) {
+                  return false; // Skip summary rows
+                }
+                
                 // Check if row has meaningful data (not just separators)
                 const hasData = values.some(
                   (v) => {
@@ -205,13 +217,19 @@ export class BankCSVParser {
       narration = String(rowLower["narration"] || rowLower["description"] || "").trim();
     }
 
+    // Filter out rows with empty narration (like opening balance rows)
+    if (!narration || narration.trim() === '' || narration === 'undefined' || narration === 'null') {
+      console.log(`Skipping row ${index + 1}: Empty narration (likely opening balance or summary row)`);
+      return null;
+    }
+
     // Filter out summary/total rows
     const narrationLower = narration.toLowerCase();
     const summaryKeywords = [
       "total", "summary", "grand total", "opening balance", 
       "closing balance", "balance", "total deposit", "total withdrawal",
       "total credit", "total debit", "net balance", "balance brought forward",
-      "balance carried forward", "opening", "closing"
+      "balance carried forward", "opening", "closing", "statement summary"
     ];
     
     const isSummaryRow = summaryKeywords.some(keyword => 
