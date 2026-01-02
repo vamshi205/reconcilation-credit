@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Transaction } from "../types/transaction";
 import { StorageService } from "../services/storageService";
 import { PartyMappingService } from "../services/partyMappingService";
@@ -17,9 +18,30 @@ import { Modal } from "../components/ui/Modal";
 type ViewType = "pending" | "completed" | "hold" | "selfTransfer";
 
 export function Transactions() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [view, setView] = useState<ViewType>("pending");
+  
+  // Check for party name and view in URL query params
+  useEffect(() => {
+    const partyParam = searchParams.get('party');
+    const viewParam = searchParams.get('view') as ViewType | null;
+    
+    if (partyParam) {
+      setSearchQuery(partyParam);
+    }
+    
+    if (viewParam && ['pending', 'completed', 'hold', 'selfTransfer'].includes(viewParam)) {
+      setView(viewParam);
+    }
+    
+    // Clear the URL parameters after setting
+    if (partyParam || viewParam) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+  
   // Date filters - local to each view
   const [dateFromPending, setDateFromPending] = useState("");
   const [dateToPending, setDateToPending] = useState("");

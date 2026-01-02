@@ -1,71 +1,82 @@
 import { useState, useEffect } from "react";
-import { Party } from "../types/transaction";
-import { StorageService } from "../services/storageService";
-import { formatCurrency, formatDate } from "../lib/utils";
+import { useNavigate } from "react-router-dom";
+import { PartiesListService, PartySummary } from "../services/partiesListService";
+import { formatCurrency } from "../lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { Button } from "../components/ui/Button";
-import { Search, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, RefreshCw, Eye } from "lucide-react";
 
 export function Parties() {
-  const [parties, setParties] = useState<Party[]>([]);
+  const navigate = useNavigate();
+  const [parties, setParties] = useState<PartySummary[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadParties = async () => {
+    try {
+      setIsRefreshing(true);
+      setError(null);
+      
+      const partiesList = await PartiesListService.getPartiesList();
+      setParties(partiesList);
+      
+      if (partiesList.length === 0) {
+        setError('No parties found. Make sure you have transactions with party names assigned.');
+      }
+    } catch (error) {
+      console.error("[Parties] Error loading parties:", error);
+      setError(`Error loading parties: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setParties([]);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    const updateParties = () => {
-      const allParties = StorageService.getParties();
-      // Recalculate balances from transactions
-      const transactions = StorageService.getTransactions();
-      const updatedParties = allParties.map((party) => {
-        const partyTransactions = transactions.filter(
-          (t) => t.partyName.toLowerCase() === party.name.toLowerCase()
-        );
-        const totalCredits = partyTransactions
-          .filter((t) => t.type === "credit")
-          .reduce((sum, t) => sum + t.amount, 0);
-        const totalDebits = partyTransactions
-          .filter((t) => t.type === "debit")
-          .reduce((sum, t) => sum + t.amount, 0);
-        const balance = totalCredits - totalDebits;
-
-        return {
-          ...party,
-          totalCredits,
-          totalDebits,
-          balance,
-          lastTransactionDate:
-            partyTransactions.length > 0
-              ? partyTransactions.sort(
-                  (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-                )[0].date
-              : undefined,
-        };
-      });
-      setParties(updatedParties.sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance)));
-    };
-    updateParties();
-    const interval = setInterval(updateParties, 2000);
-    return () => clearInterval(interval);
+    // Initial load
+    loadParties();
   }, []);
 
-  const filteredParties = parties.filter((p) => {
+  const handleRefresh = () => {
+    loadParties();
+  };
+
+  const handleViewTransactions = (partyName: string) => {
+    // Navigate to Transactions page with party name in search query and view set to completed
+    navigate(`/transactions?party=${encodeURIComponent(partyName)}&view=completed`);
+  };
+
+  // Filter parties based on search query
+  const filteredParties = parties.filter((party) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
-    return p.name.toLowerCase().includes(query);
+    return party.name.toLowerCase().includes(query);
   });
-
-  const customers = filteredParties.filter((p) => p.type === "customer");
-  const suppliers = filteredParties.filter((p) => p.type === "supplier");
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-4xl font-display font-bold text-gradient">
-          Parties
-        </h1>
-        <p className="text-muted-foreground mt-2">
-          Manage customers and suppliers with their balances
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-4xl font-display font-bold text-gradient">
+            Parties
+          </h1>
+          <p className="text-muted-foreground mt-2">
+            View parties with total amounts from completed transactions only
+          </p>
+        </div>
+        <Button
+          onClick={handleRefresh}
+          disabled={isRefreshing || isLoading}
+          variant="outline"
+          className="flex items-center gap-2"
+        >
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {isRefreshing ? 'Refreshing...' : 'Refresh'}
+        </Button>
       </div>
 
       <Card>
@@ -82,108 +93,75 @@ export function Parties() {
         </CardContent>
       </Card>
 
-      <div>
-        <h2 className="text-2xl font-semibold mb-4">Customers ({customers.length})</h2>
-        {customers.length === 0 ? (
-          <Card>
-            <CardContent className="p-8 text-center text-muted-foreground">
-              No customers found
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {customers.map((party) => (
-              <Card key={party.id}>
-                <CardHeader>
-                  <CardTitle className="text-lg">{party.name}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Balance</span>
-                    <span
-                      className={`text-lg font-bold ${
-                        party.balance >= 0 ? "text-green-600" : "text-red-600"
-                      }`}
-                    >
-                      {party.balance >= 0 ? "+" : ""}
-                      {formatCurrency(party.balance)}
-                    </span>
+      {isLoading ? (
+        <Card>
+          <CardContent className="p-8 text-center text-muted-foreground">
+            <div className="flex flex-col items-center gap-2">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <p>Loading parties...</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : error ? (
+        <Card>
+          <CardContent className="p-8 text-center">
+            <div className="text-muted-foreground">
+              <p className="mb-2 font-medium text-destructive">{error}</p>
+              <p className="text-sm mt-4">Troubleshooting:</p>
+              <ul className="text-sm text-left mt-2 space-y-1 max-w-md mx-auto">
+                <li>• Check if you have transactions in the Transactions page</li>
+                <li>• Make sure transactions have party names assigned</li>
+                <li>• Click Refresh to reload data</li>
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
+      ) : filteredParties.length === 0 ? (
+        <Card>
+          <CardContent className="p-8 text-center text-muted-foreground">
+            <p className="mb-2 font-medium">No parties found.</p>
+            <p className="text-sm">Make sure you have transactions with party names assigned.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {filteredParties.map((party, index) => (
+            <Card key={`${party.name}-${index}`} className="hover:shadow-md transition-shadow">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="font-semibold text-lg">{party.name}</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {party.transactionCount} completed transaction{party.transactionCount !== 1 ? 's' : ''}
+                    </p>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Total Credits</span>
-                    <span className="font-medium text-green-600">
-                      {formatCurrency(party.totalCredits)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Total Debits</span>
-                    <span className="font-medium text-red-600">
-                      {formatCurrency(party.totalDebits)}
-                    </span>
-                  </div>
-                  {party.lastTransactionDate && (
-                    <div className="text-xs text-muted-foreground pt-2 border-t">
-                      Last transaction: {formatDate(party.lastTransactionDate)}
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <p
+                        className={`text-2xl font-bold ${
+                          party.totalAmount >= 0 ? "text-green-600" : "text-red-600"
+                        }`}
+                      >
+                        {party.totalAmount >= 0 ? "+" : ""}
+                        {formatCurrency(party.totalAmount)}
+                      </p>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <h2 className="text-2xl font-semibold mb-4">Suppliers ({suppliers.length})</h2>
-        {suppliers.length === 0 ? (
-          <Card>
-            <CardContent className="p-8 text-center text-muted-foreground">
-              No suppliers found
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {suppliers.map((party) => (
-              <Card key={party.id}>
-                <CardHeader>
-                  <CardTitle className="text-lg">{party.name}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Balance</span>
-                    <span
-                      className={`text-lg font-bold ${
-                        party.balance <= 0 ? "text-green-600" : "text-red-600"
-                      }`}
+                    <Button
+                      onClick={() => handleViewTransactions(party.name)}
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center gap-2"
                     >
-                      {party.balance >= 0 ? "+" : ""}
-                      {formatCurrency(party.balance)}
-                    </span>
+                      <Eye className="h-4 w-4" />
+                      View
+                    </Button>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Total Credits</span>
-                    <span className="font-medium text-green-600">
-                      {formatCurrency(party.totalCredits)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Total Debits</span>
-                    <span className="font-medium text-red-600">
-                      {formatCurrency(party.totalDebits)}
-                    </span>
-                  </div>
-                  {party.lastTransactionDate && (
-                    <div className="text-xs text-muted-foreground pt-2 border-t">
-                      Last transaction: {formatDate(party.lastTransactionDate)}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
-
