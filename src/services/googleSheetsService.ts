@@ -486,6 +486,132 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
 }
 
 /**
+ * Fetch all debit transactions from Google Sheets
+ */
+export async function fetchDebitTransactionsFromSheets(): Promise<Transaction[]> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    console.warn('Google Apps Script URL not configured. Cannot fetch debit transactions.');
+    return [];
+  }
+
+  try {
+    console.log('Fetching debit transactions from Google Sheets...');
+
+    // Use GET request to fetch data
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getDebitTransactions`, {
+      method: 'GET',
+    });
+
+    const responseText = await response.text();
+    console.log('Google Sheets response:', responseText.substring(0, 500));
+
+    // Check if response is HTML (sign-in page) instead of JSON
+    if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
+      console.error('Google Apps Script requires authorization.');
+      throw new Error('Script requires authorization. Please authorize the Google Apps Script first.');
+    }
+
+    // Parse JSON response
+    const result = JSON.parse(responseText);
+    
+    if (result.success && result.data) {
+      // Convert sheet rows to Transaction objects (same format as fetchTransactionsFromSheets)
+      const transactions = result.data.map((row: any[]) => {
+        // Column order: [ID, Date, Narration, Bank Ref No., Amount, Party Name, Category, Type, Added to Vyapar, Vyapar Ref No., Hold, Notes, Created At, Updated At]
+        
+        // Get date as STRING from Google Sheets - keep exactly as shown in Google Sheets
+        let dateStr = String(row[1] || '').trim();
+        
+        // Helper function to add 1 day to a date
+        const addOneDay = (year: number, month: number, day: number): { year: number; month: number; day: number } => {
+          const date = new Date(year, month - 1, day);
+          date.setDate(date.getDate() + 1); // Add 1 day
+          return {
+            year: date.getFullYear(),
+            month: date.getMonth() + 1,
+            day: date.getDate()
+          };
+        };
+        
+        // If it's already in "DD MMM YYYY" format, parse it and add 1 day
+        const dateMatch = dateStr.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+        if (dateMatch) {
+          const months: { [key: string]: number } = {
+            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+          };
+          const day = parseInt(dateMatch[1], 10);
+          const month = months[dateMatch[2]] || 1;
+          const year = parseInt(dateMatch[3], 10);
+          const newDate = addOneDay(year, month, day);
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          dateStr = `${newDate.day} ${monthNames[newDate.month - 1]} ${newDate.year}`;
+        }
+        
+        // Parse amount - ensure it's a number
+        let amount = 0;
+        const amountValue = row[4];
+        if (typeof amountValue === 'number') {
+          amount = amountValue;
+        } else if (typeof amountValue === 'string') {
+          // Remove commas and parse
+          const cleaned = amountValue.replace(/,/g, '').trim();
+          amount = parseFloat(cleaned) || 0;
+        }
+        
+        // Parse reference number
+        let refNumber = String(row[3] || '').trim();
+        if (!refNumber || refNumber === 'undefined' || refNumber === 'null') {
+          refNumber = '';
+        }
+        
+        // Parse Vyapar reference number
+        let vyaparRef = String(row[9] || '').trim();
+        if (!vyaparRef || vyaparRef === 'undefined' || vyaparRef === 'null') {
+          vyaparRef = '';
+        }
+        
+        // Parse notes
+        let notesValue: string | undefined;
+        const notesStr = String(row[11] || '').trim();
+        if (notesStr && notesStr !== 'undefined' && notesStr !== 'null' && notesStr !== '') {
+          notesValue = notesStr;
+        } else {
+          notesValue = undefined;
+        }
+        
+        return {
+          id: String(row[0] || '').trim() || '',
+          date: dateStr || formatDateForSheets(new Date()),
+          description: String(row[2] || '').trim(),
+          referenceNumber: refNumber,
+          amount: amount,
+          partyName: String(row[5] || '').trim(),
+          category: (row[6] || 'Other Debit') as Transaction['category'],
+          type: 'debit' as 'debit',
+          added_to_vyapar: row[8] === 'Yes' || row[8] === true || row[8] === 'true',
+          vyapar_reference_number: vyaparRef,
+          hold: row[10] === 'Yes' || row[10] === true || row[10] === 'true',
+          selfTransfer: row[11] === 'Yes' || row[11] === true || row[11] === 'true',
+          notes: notesValue,
+          createdAt: row[13] || formatDateForSheets(new Date()),
+          updatedAt: row[14] || formatDateForSheets(new Date()),
+        } as Transaction;
+      });
+
+      console.log(`✓ Fetched ${transactions.length} debit transactions from Google Sheets`);
+      return transactions;
+    } else {
+      console.error('Failed to fetch debit transactions:', result.error);
+      return [];
+    }
+  } catch (error) {
+    console.error('Error fetching debit transactions from Google Sheets:', error);
+    return [];
+  }
+}
+
+/**
  * Save party mapping to Google Sheets
  */
 export async function savePartyMappingToSheets(mapping: PartyNameMapping): Promise<boolean> {
@@ -686,6 +812,44 @@ export async function fetchPartiesFromSheets(): Promise<string[]> {
     return [];
   } catch (error) {
     console.error('Error fetching parties from Google Sheets:', error);
+    return [];
+  }
+}
+
+/**
+ * Fetch all suppliers from Google Sheets
+ */
+export async function fetchSuppliersFromSheets(): Promise<string[]> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    return [];
+  }
+
+  try {
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getSuppliers`, {
+      method: 'GET',
+    });
+
+    const responseText = await response.text();
+    
+    if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
+      console.error('Google Apps Script requires authorization.');
+      return [];
+    }
+
+    const result = JSON.parse(responseText);
+    
+    if (result.success && result.data) {
+      // Extract supplier names from rows (assuming first column contains supplier name)
+      const suppliers = result.data
+        .map((row: any[]) => String(row[0] || '').trim())
+        .filter((supplier: string) => supplier.length > 0);
+      
+      return suppliers;
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Error fetching suppliers from Google Sheets:', error);
     return [];
   }
 }

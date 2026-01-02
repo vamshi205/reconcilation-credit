@@ -6,6 +6,7 @@ import {
   isGoogleSheetsConfigured,
   PartyNameMapping,
   fetchPartiesFromSheets,
+  fetchSuppliersFromSheets,
   findMatchingParties
 } from './googleSheetsService';
 
@@ -21,6 +22,11 @@ const CACHE_DURATION = 60000; // 1 minute cache
 let partiesCache: string[] = [];
 let partiesCacheTime: number = 0;
 const PARTIES_CACHE_DURATION = 300000; // 5 minutes cache (parties list changes less frequently)
+
+// Cache for suppliers list (loaded from Google Sheets)
+let suppliersCache: string[] = [];
+let suppliersCacheTime: number = 0;
+const SUPPLIERS_CACHE_DURATION = 300000; // 5 minutes cache (suppliers list changes less frequently)
 
 export class PartyMappingService {
   /**
@@ -110,6 +116,45 @@ export class PartyMappingService {
     
     // Use word-by-word matching to find top matches
     return findMatchingParties(narration, parties, maxMatches);
+  }
+
+  /**
+   * Get all suppliers from Google Sheets (cached)
+   */
+  static async getSuppliers(): Promise<string[]> {
+    const now = Date.now();
+    // Use separate suppliers cache
+    if (suppliersCache.length > 0 && (now - suppliersCacheTime) < SUPPLIERS_CACHE_DURATION) {
+      return suppliersCache;
+    }
+
+    if (isGoogleSheetsConfigured()) {
+      try {
+        const suppliers = await fetchSuppliersFromSheets();
+        suppliersCache = suppliers;
+        suppliersCacheTime = now;
+        return suppliers;
+      } catch (error) {
+        console.error('Error fetching suppliers from Google Sheets:', error);
+        return suppliersCache; // Return cached data on error
+      }
+    }
+    
+    return [];
+  }
+
+  /**
+   * Find supplier names from narration using word-by-word matching against suppliers list
+   * Returns top 2-3 matches
+   */
+  static async findSuppliersFromNarration(narration: string, maxMatches: number = 3): Promise<string[]> {
+    if (!narration || narration.trim().length < 5) return [];
+    
+    const suppliers = await this.getSuppliers();
+    if (suppliers.length === 0) return [];
+    
+    // Use word-by-word matching to find top matches
+    return findMatchingParties(narration, suppliers, maxMatches);
   }
 
   /**

@@ -8,9 +8,11 @@ const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
   { name: "Manual Entry", href: "/manual-entry", icon: Plus },
   { name: "CSV Upload", href: "/csv-upload", icon: Upload },
-  { name: "Transactions", href: "/transactions", icon: List },
+  { name: "Credit Transactions", href: "/transactions", icon: List },
+  { name: "Debit Transactions", href: "/debit-transactions", icon: List },
   { name: "Reconciliation", href: "/reconciliation", icon: CheckSquare },
   { name: "Parties", href: "/parties", icon: Users },
+  { name: "Suppliers", href: "/suppliers", icon: Users },
   { name: "Party Mappings", href: "/party-mappings", icon: Sparkles },
 ];
 

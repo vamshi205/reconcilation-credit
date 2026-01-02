@@ -6,8 +6,10 @@ import { Dashboard } from "./pages/Dashboard";
 import { ManualEntry } from "./pages/ManualEntry";
 import { CSVUpload } from "./pages/CSVUpload";
 import { Transactions } from "./pages/Transactions";
+import { DebitTransactions } from "./pages/DebitTransactions";
 import { Reconciliation } from "./pages/Reconciliation";
 import { Parties } from "./pages/Parties";
+import { Suppliers } from "./pages/Suppliers";
 import { PartyMappings } from "./pages/PartyMappings";
 
 function App() {
@@ -31,8 +33,10 @@ function App() {
                       <Route path="/manual-entry" element={<ManualEntry />} />
                       <Route path="/csv-upload" element={<CSVUpload />} />
                       <Route path="/transactions" element={<Transactions />} />
+                      <Route path="/debit-transactions" element={<DebitTransactions />} />
                       <Route path="/reconciliation" element={<Reconciliation />} />
                       <Route path="/parties" element={<Parties />} />
+                      <Route path="/suppliers" element={<Suppliers />} />
                       <Route path="/party-mappings" element={<PartyMappings />} />
                     </Routes>
                   </div>
