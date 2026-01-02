@@ -81,9 +81,18 @@ export class StorageService {
         updatedTransaction.date = originalDate;
       }
       
-      // Update asynchronously (don't block the UI)
-      updateTransactionInSheets(updatedTransaction).catch(error => {
-        console.error('Failed to sync transaction update to Google Sheets:', error);
+      // Update and handle result
+      updateTransactionInSheets(updatedTransaction).then(result => {
+        if (!result.success) {
+          console.error('❌ Failed to sync transaction update to Google Sheets:', result.error);
+          // Show error to user
+          alert(`⚠️ Failed to update transaction in Google Sheets!\n\nError: ${result.error || 'Unknown error'}\n\nPlease try again or refresh the page.`);
+        } else {
+          console.log('✓ Transaction successfully updated in Google Sheets');
+        }
+      }).catch(error => {
+        console.error('❌ Error updating transaction in Google Sheets:', error);
+        alert(`⚠️ Error updating transaction in Google Sheets!\n\n${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try again or refresh the page.`);
       });
     } else if (!isGoogleSheetsConfigured()) {
       console.warn('Google Sheets not configured. Transaction update will not be saved.');

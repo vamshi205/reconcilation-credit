@@ -552,11 +552,33 @@ export function DebitTransactions() {
   };
 
   // Handle confirm (tick icon)
-  const handleConfirm = (id: string) => {
+  const handleConfirm = async (id: string) => {
     const transaction = transactions.find((t) => t.id === id);
     if (transaction) {
       const finalValue = inputValues[id] ?? transaction.vyapar_reference_number ?? "";
       if (finalValue.trim()) {
+        // Check for duplicate Vyapar reference number
+        const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
+        const duplicateCheck = await checkDuplicateVyaparRef(finalValue.trim(), id);
+        
+        if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
+          const existing = duplicateCheck.existingTransaction;
+          const existingDate = existing.date || 'N/A';
+          const existingAmount = existing.amount || 0;
+          const existingParty = existing.partyName || 'N/A';
+          
+          alert(
+            `❌ DUPLICATE VYAPAR REFERENCE NUMBER!\n\n` +
+            `This Vyapar reference number "${finalValue.trim()}" already exists:\n\n` +
+            `Transaction ID: ${duplicateCheck.existingTransactionId}\n` +
+            `Date: ${existingDate}\n` +
+            `Amount: ₹${existingAmount.toLocaleString()}\n` +
+            `Supplier: ${existingParty}\n\n` +
+            `Please use a different Vyapar reference number.`
+          );
+          return; // Prevent submission
+        }
+        
         // Remove hold status when completing transaction
         const updates: any = {
           added_to_vyapar: true,
@@ -569,12 +591,7 @@ export function DebitTransactions() {
         }
         
         // Ensure checkbox is checked and save to Google Sheets
-        StorageService.updateTransaction(id, updates, transaction);
-        
-        // Clear focus tracking
-        focusedInputId.current = null;
-        
-        // Update local state - NEVER UPDATE DATE
+        // Update local state first for immediate UI feedback
         setTransactions((prev) =>
           prev.map((t) =>
             t.id === id
@@ -595,6 +612,12 @@ export function DebitTransactions() {
           delete newValues[id];
           return newValues;
         });
+        
+        // Clear focus tracking
+        focusedInputId.current = null;
+        
+        // Save to Google Sheets (this will show error if it fails)
+        StorageService.updateTransaction(id, updates, transaction);
         
         alert("Transaction moved to completed transactions");
       }
@@ -1123,6 +1146,28 @@ export function DebitTransactions() {
       return;
     }
     
+    // Check for duplicate Vyapar reference number
+    const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
+    const duplicateCheck = await checkDuplicateVyaparRef(vyaparRef, editingTransaction.id);
+    
+    if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
+      const existing = duplicateCheck.existingTransaction;
+      const existingDate = existing.date || 'N/A';
+      const existingAmount = existing.amount || 0;
+      const existingParty = existing.partyName || 'N/A';
+      
+      alert(
+        `❌ DUPLICATE VYAPAR REFERENCE NUMBER!\n\n` +
+        `This Vyapar reference number "${vyaparRef}" already exists:\n\n` +
+        `Transaction ID: ${duplicateCheck.existingTransactionId}\n` +
+        `Date: ${existingDate}\n` +
+        `Amount: ₹${existingAmount.toLocaleString()}\n` +
+        `Supplier: ${existingParty}\n\n` +
+        `Please use a different Vyapar reference number.`
+      );
+      return; // Prevent submission
+    }
+    
     // Update transaction with party name and Vyapar ref
     // NEVER UPDATE DATE - preserve original date
     const updatedTransaction = {
@@ -1134,7 +1179,17 @@ export function DebitTransactions() {
       date: editingTransaction.date, // Explicitly preserve original date
     };
     
-    // Save to Google Sheets
+    // Update local state first
+    setTransactions((prev) =>
+      prev.map((t) =>
+        t.id === editingTransaction.id ? updatedTransaction : t
+      )
+    );
+    
+    // Close modal
+    handleCloseEditModal();
+    
+    // Save to Google Sheets (this will show error if it fails)
     StorageService.updateTransaction(editingTransaction.id, {
       partyName,
       vyapar_reference_number: vyaparRef,
@@ -1148,16 +1203,6 @@ export function DebitTransactions() {
         console.error('Error training party mapping:', err);
       });
     }
-
-    // Update local state
-    setTransactions((prev) =>
-      prev.map((t) =>
-        t.id === editingTransaction.id ? updatedTransaction : t
-      )
-    );
-    
-    // Close modal
-    handleCloseEditModal();
     
     alert("Transaction moved to completed!");
   };

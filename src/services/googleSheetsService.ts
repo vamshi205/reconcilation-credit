@@ -28,77 +28,230 @@ export interface PartyNameMapping {
 }
 
 /**
+ * Check if a Vyapar reference number already exists in the system
+ * Returns the transaction ID if duplicate found, null otherwise
+ */
+export async function checkDuplicateVyaparRef(vyaparRef: string, excludeTransactionId?: string): Promise<{ isDuplicate: boolean; existingTransactionId?: string; existingTransaction?: Transaction }> {
+  if (!vyaparRef || !vyaparRef.trim()) {
+    return { isDuplicate: false };
+  }
+
+  const trimmedRef = vyaparRef.trim().toLowerCase();
+
+  try {
+    // Fetch all transactions from Google Sheets
+    const allTransactions = await fetchTransactionsFromSheets();
+    
+    // Also check debit transactions
+    const debitTransactions = await fetchDebitTransactionsFromSheets();
+    const allTransactionsCombined = [...allTransactions, ...debitTransactions];
+
+    // Check for duplicate (case-insensitive)
+    const duplicate = allTransactionsCombined.find((t) => {
+      if (t.id === excludeTransactionId) return false; // Exclude current transaction
+      if (!t.vyapar_reference_number) return false;
+      return String(t.vyapar_reference_number).trim().toLowerCase() === trimmedRef;
+    });
+
+    if (duplicate) {
+      return {
+        isDuplicate: true,
+        existingTransactionId: duplicate.id,
+        existingTransaction: duplicate,
+      };
+    }
+
+    return { isDuplicate: false };
+  } catch (error) {
+    console.error('Error checking duplicate Vyapar reference:', error);
+    // On error, allow the operation (fail open) but log the error
+    return { isDuplicate: false };
+  }
+}
+
+/**
+ * Verify that a transaction was successfully updated in Google Sheets
+ * Fetches the transaction back and compares the Vyapar reference number
+ */
+export async function verifyTransactionUpdate(transactionId: string, expectedVyaparRef: string, transactionType: 'credit' | 'debit' = 'credit'): Promise<{ success: boolean; actualValue?: string; error?: string }> {
+  if (!transactionId || !expectedVyaparRef) {
+    return { success: false, error: 'Missing transaction ID or Vyapar reference' };
+  }
+
+  try {
+    // Wait a bit for Google Sheets to process the update
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Fetch the transaction back from Google Sheets
+    const transactions = transactionType === 'credit' 
+      ? await fetchTransactionsFromSheets()
+      : await fetchDebitTransactionsFromSheets();
+    
+    const updatedTransaction = transactions.find(t => t.id === transactionId);
+
+    if (!updatedTransaction) {
+      return { success: false, error: 'Transaction not found in Google Sheets' };
+    }
+
+    const actualRef = updatedTransaction.vyapar_reference_number 
+      ? String(updatedTransaction.vyapar_reference_number).trim() 
+      : '';
+
+    const expectedRef = expectedVyaparRef.trim();
+
+    if (actualRef.toLowerCase() === expectedRef.toLowerCase()) {
+      return { success: true, actualValue: actualRef };
+    } else {
+      return { 
+        success: false, 
+        actualValue: actualRef, 
+        error: `Mismatch: Expected "${expectedRef}" but found "${actualRef}"` 
+      };
+    }
+  } catch (error) {
+    console.error('Error verifying transaction update:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+/**
  * Update an existing transaction in Google Sheets
  * Finds the transaction by ID and updates the row
+ * Now includes verification to confirm the update was successful
  */
-export async function updateTransactionInSheets(transaction: Transaction): Promise<boolean> {
+export async function updateTransactionInSheets(transaction: Transaction): Promise<{ success: boolean; error?: string }> {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
     console.warn('Google Apps Script URL not configured. Skipping Google Sheets update.');
-    return false;
+    return { success: false, error: 'Google Apps Script URL not configured' };
   }
 
   try {
     // Format transaction data as row array
     const rowData = formatTransactionAsRow(transaction);
 
-    console.log('Updating transaction in Google Sheets:', { id: transaction.id });
+    console.log('Updating transaction in Google Sheets:', { id: transaction.id, vyaparRef: transaction.vyapar_reference_number });
 
-    // Google Apps Script - use URL-encoded form data
-    return new Promise((resolve) => {
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      iframe.name = 'google-sheets-iframe-update-' + Date.now();
-      document.body.appendChild(iframe);
+    // Use fetch API for better error handling and response checking
+    const formData = new URLSearchParams();
+    formData.append('action', 'updateRow');
+    formData.append('transactionId', transaction.id);
+    formData.append('data', JSON.stringify(rowData));
 
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = APPS_SCRIPT_URL;
-      form.target = iframe.name;
-      form.enctype = 'application/x-www-form-urlencoded';
-      form.style.display = 'none';
-
-      // Send update data
-      const payload = {
-        action: 'updateRow',
-        transactionId: transaction.id,
-        data: JSON.stringify(rowData), // Send full row data as JSON string
-      };
-
-      console.log('Update payload:', payload);
-
-      // Add each field as a form input
-      Object.keys(payload).forEach(key => {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = key;
-        input.value = payload[key as keyof typeof payload];
-        form.appendChild(input);
+    // Try using fetch first (more reliable)
+    try {
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formData.toString(),
+        mode: 'no-cors', // Google Apps Script doesn't support CORS, but we'll verify separately
       });
 
-      document.body.appendChild(form);
-
-      // Submit and wait
-      form.submit();
+      // Since we're using no-cors, we can't read the response
+      // So we'll verify the update after a delay
+      console.log('Update request sent, verifying...');
       
-      // Clean up after a delay
-      setTimeout(() => {
-        try {
-          if (document.body.contains(form)) {
-            document.body.removeChild(form);
-          }
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-        } catch (e) {
-          // Already removed
+      // Wait a bit for Google Sheets to process
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Verify the update was successful
+      if (transaction.vyapar_reference_number) {
+        const verification = await verifyTransactionUpdate(
+          transaction.id,
+          transaction.vyapar_reference_number,
+          transaction.type || 'credit'
+        );
+        
+        if (verification.success) {
+          console.log('✓ Transaction updated and verified in Google Sheets');
+          return { success: true };
+        } else {
+          const errorMsg = `Update verification failed: ${verification.error || 'Unknown error'}. Expected: "${transaction.vyapar_reference_number}", Found: "${verification.actualValue || 'N/A'}"`;
+          console.error('⚠️', errorMsg);
+          return { success: false, error: errorMsg };
         }
-        console.log('✓ Transaction updated in Google Sheets');
-        resolve(true);
-      }, 2000);
-    });
+      } else {
+        // For updates without Vyapar ref, we can't verify easily, so just wait and assume success
+        console.log('✓ Transaction update request sent (no verification for updates without Vyapar ref)');
+        return { success: true };
+      }
+    } catch (fetchError) {
+      console.warn('Fetch API failed, falling back to iframe method:', fetchError);
+      
+      // Fallback to iframe method
+      return new Promise((resolve) => {
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.name = 'google-sheets-iframe-update-' + Date.now();
+        document.body.appendChild(iframe);
+
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = APPS_SCRIPT_URL;
+        form.target = iframe.name;
+        form.enctype = 'application/x-www-form-urlencoded';
+        form.style.display = 'none';
+
+        // Send update data
+        const payload = {
+          action: 'updateRow',
+          transactionId: transaction.id,
+          data: JSON.stringify(rowData),
+        };
+
+        // Add each field as a form input
+        Object.keys(payload).forEach(key => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = key;
+          input.value = payload[key as keyof typeof payload];
+          form.appendChild(input);
+        });
+
+        document.body.appendChild(form);
+        form.submit();
+        
+        // Clean up and verify after a delay
+        setTimeout(async () => {
+          try {
+            if (document.body.contains(form)) {
+              document.body.removeChild(form);
+            }
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+          } catch (e) {
+            // Already removed
+          }
+          
+          // Verify the update was successful
+          if (transaction.vyapar_reference_number) {
+            const verification = await verifyTransactionUpdate(
+              transaction.id,
+              transaction.vyapar_reference_number,
+              transaction.type || 'credit'
+            );
+            
+            if (verification.success) {
+              console.log('✓ Transaction updated and verified in Google Sheets');
+              resolve({ success: true });
+            } else {
+              const errorMsg = `Update verification failed: ${verification.error || 'Unknown error'}`;
+              console.error('⚠️', errorMsg);
+              resolve({ success: false, error: errorMsg });
+            }
+          } else {
+            console.log('✓ Transaction update request sent (no verification)');
+            resolve({ success: true });
+          }
+        }, 3000);
+      });
+    }
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error updating transaction in Google Sheets:', error);
-    return false;
+    return { success: false, error: errorMsg };
   }
 }
 
@@ -230,8 +383,61 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
   console.log(`Starting to save ${transactions.length} transactions to Google Sheets in batch...`);
 
   try {
-    // Format all transactions as rows
-    const allRows = transactions.map(transaction => formatTransactionAsRow(transaction));
+    // DEDUPLICATION: Remove duplicate transactions before saving
+    // Check for duplicates by ID and by composite key (date + amount + description + reference)
+    const existingTransactions = await fetchTransactionsFromSheets();
+    const existingDebitTransactions = await fetchDebitTransactionsFromSheets();
+    const allExisting = [...existingTransactions, ...existingDebitTransactions];
+    
+    // Create a Set of existing transaction keys
+    const existingKeys = new Set<string>();
+    allExisting.forEach(t => {
+      // Primary key: transaction ID
+      if (t.id && t.id.trim()) {
+        existingKeys.add(`id:${t.id.trim()}`);
+      }
+      // Composite key: date + amount + description + reference
+      const dateStr = t.date || '';
+      const amountStr = String(t.amount || 0);
+      const descStr = (t.description || '').substring(0, 50).trim();
+      const refStr = (t.referenceNumber || '').trim();
+      existingKeys.add(`composite:${dateStr}|${amountStr}|${descStr}|${refStr}`);
+    });
+    
+    // Filter out duplicates
+    const uniqueTransactions = transactions.filter(t => {
+      // Check by ID
+      if (t.id && t.id.trim()) {
+        if (existingKeys.has(`id:${t.id.trim()}`)) {
+          console.log(`⚠️ Skipping duplicate transaction by ID: ${t.id}`);
+          return false;
+        }
+      }
+      // Check by composite key
+      const dateStr = t.date || '';
+      const amountStr = String(t.amount || 0);
+      const descStr = (t.description || '').substring(0, 50).trim();
+      const refStr = (t.referenceNumber || '').trim();
+      const compositeKey = `composite:${dateStr}|${amountStr}|${descStr}|${refStr}`;
+      if (existingKeys.has(compositeKey)) {
+        console.log(`⚠️ Skipping duplicate transaction by composite key: ${compositeKey}`);
+        return false;
+      }
+      return true;
+    });
+    
+    if (uniqueTransactions.length < transactions.length) {
+      const duplicatesCount = transactions.length - uniqueTransactions.length;
+      console.log(`⚠️ Removed ${duplicatesCount} duplicate transaction(s) before saving`);
+    }
+    
+    if (uniqueTransactions.length === 0) {
+      console.log('All transactions were duplicates. Nothing to save.');
+      return { success: 0, failed: transactions.length };
+    }
+
+    // Format all unique transactions as rows
+    const allRows = uniqueTransactions.map(transaction => formatTransactionAsRow(transaction));
     
     console.log(`Sending batch of ${allRows.length} transactions...`);
 
@@ -283,8 +489,9 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
         } catch (e) {
           // Already removed
         }
-        console.log(`✓ Batch of ${transactions.length} transactions sent to Google Sheets`);
-        resolve({ success: transactions.length, failed: 0 });
+        console.log(`✓ Batch of ${uniqueTransactions.length} unique transactions sent to Google Sheets`);
+        const duplicatesCount = transactions.length - uniqueTransactions.length;
+        resolve({ success: uniqueTransactions.length, failed: duplicatesCount });
       }, 3000); // Give it a bit more time for batch processing
     });
   } catch (error) {
