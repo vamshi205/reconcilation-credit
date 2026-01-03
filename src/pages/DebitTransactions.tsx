@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card"
 import { Input } from "../components/ui/Input";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Button } from "../components/ui/Button";
-import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer, LogOut } from "lucide-react";
+import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer, LogOut, Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Label } from "../components/ui/Label";
 import { Modal } from "../components/ui/Modal";
@@ -1495,6 +1495,23 @@ export function DebitTransactions() {
           </Button>
         </div>
       </div>
+
+      {/* Loading state */}
+      {isLoading && (
+        <Card className="glass-card border-2 border-primary/60 bg-primary/5 animate-fade-in">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4">
+              <Loader2 className="h-6 w-6 text-primary animate-spin" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground mb-1">Loading Transactions...</h3>
+                <p className="text-sm text-muted-foreground">
+                  Fetching data. Please wait...
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Tabs - Minimal & Clean */}
       <div className="flex gap-2 border-b border-border/60 bg-card/50 rounded-t-lg p-1">

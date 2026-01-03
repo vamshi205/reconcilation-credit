@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
-import { StorageService, DashboardStats } from "../services/storageService";
+import { StorageService } from "../services/storageService";
 import { fetchTransactionsFromSheets, isGoogleSheetsConfigured } from "../services/googleSheetsService";
-import { Transaction } from "../types/transaction";
+import { Transaction, DashboardStats } from "../types/transaction";
 import { formatCurrency } from "../lib/utils";
-import { AlertCircle, CheckCircle, TrendingUp } from "lucide-react";
+import { AlertCircle, CheckCircle, TrendingUp, Loader2 } from "lucide-react";
 import { Input } from "../components/ui/Input";
 import { Label } from "../components/ui/Label";
 import { Button } from "../components/ui/Button";
@@ -27,10 +27,22 @@ export function Dashboard() {
 
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
 
   // Load transactions from Google Sheets
   useEffect(() => {
-    const loadTransactions = async () => {
+    const loadTransactions = async (isInitial = false) => {
+      // Only show loading state on initial load
+      if (isInitial) {
+        setIsLoading(true);
+      }
+      
       if (isGoogleSheetsConfigured()) {
         try {
           console.log('Loading transactions from Google Sheets...');
@@ -42,9 +54,16 @@ export function Dashboard() {
           setTransactions(creditTransactions);
         } catch (error) {
           console.error('Error fetching transactions for dashboard:', error);
-          // Show error message to user
-          alert(`Failed to load transactions from Google Sheets.\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease check:\n1. Google Sheets URL is configured\n2. Google Apps Script is authorized\n3. Check browser console for details`);
+          // Only show alert on initial load
+          if (isInitial) {
+            alert(`Failed to load transactions from Google Sheets.\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease check:\n1. Google Sheets URL is configured\n2. Google Apps Script is authorized\n3. Check browser console for details`);
+          }
           setTransactions([]);
+        } finally {
+          if (isInitial) {
+            setIsLoading(false);
+            setIsInitialLoad(false);
+          }
         }
       } else {
         console.warn('Google Sheets not configured. Cannot load transactions.');
@@ -53,12 +72,17 @@ export function Dashboard() {
         const creditTransactions = localTransactions.filter((t) => t.type === "credit");
         console.log(`Loaded ${creditTransactions.length} transactions from local storage`);
         setTransactions(creditTransactions);
+        if (isInitial) {
+          setIsLoading(false);
+          setIsInitialLoad(false);
+        }
       }
     };
     
-    loadTransactions();
-    // Update stats every 5 seconds to reflect changes
-    const interval = setInterval(loadTransactions, 5000);
+    // Initial load with loading state
+    loadTransactions(true);
+    // Update stats every 5 seconds to reflect changes (silent refresh, no loading state)
+    const interval = setInterval(() => loadTransactions(false), 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -184,6 +208,25 @@ export function Dashboard() {
 
   const isConfigured = isGoogleSheetsConfigured();
 
+  const testConnection = async () => {
+    setIsTestingConnection(true);
+    setConnectionTestResult(null);
+    try {
+      const testTransactions = await fetchTransactionsFromSheets();
+      setConnectionTestResult({
+        success: true,
+        message: `Connection successful! Found ${testTransactions.length} transaction(s).`
+      });
+    } catch (error) {
+      setConnectionTestResult({
+        success: false,
+        message: `Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -194,7 +237,62 @@ export function Dashboard() {
           </h1>
           <p className="text-muted-foreground mt-2">Overview of deposit transactions and Vyapar sync status</p>
         </div>
+        {isConfigured && (
+          <Button
+            variant="outline"
+            onClick={testConnection}
+            disabled={isTestingConnection}
+            className="flex items-center gap-2"
+          >
+            {isTestingConnection ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Testing...
+              </>
+            ) : (
+              "Test Connection"
+            )}
+          </Button>
+        )}
       </div>
+
+      {/* Connection test result */}
+      {connectionTestResult && (
+        <Card className={`glass-card border-2 animate-fade-in ${
+          connectionTestResult.success 
+            ? 'border-green-500/60 bg-green-50/50' 
+            : 'border-red-500/60 bg-red-50/50'
+        }`}>
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-4">
+              {connectionTestResult.success ? (
+                <CheckCircle className="h-6 w-6 text-green-600 mt-0.5" />
+              ) : (
+                <AlertCircle className="h-6 w-6 text-red-600 mt-0.5" />
+              )}
+              <div className="flex-1">
+                <h3 className={`font-semibold mb-2 ${
+                  connectionTestResult.success ? 'text-green-900' : 'text-red-900'
+                }`}>
+                  {connectionTestResult.success ? 'Connection Test Successful' : 'Connection Test Failed'}
+                </h3>
+                <p className={`text-sm mb-3 ${
+                  connectionTestResult.success ? 'text-green-800' : 'text-red-800'
+                }`}>
+                  {connectionTestResult.message}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConnectionTestResult(null)}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Warning if Google Sheets not configured */}
       {!isConfigured && (
@@ -216,8 +314,25 @@ export function Dashboard() {
         </Card>
       )}
 
-      {/* Info if no transactions */}
-      {isConfigured && transactions.length === 0 && (
+      {/* Loading state */}
+      {isConfigured && isLoading && (
+        <Card className="glass-card border-2 border-primary/60 bg-primary/5 animate-fade-in">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4">
+              <Loader2 className="h-6 w-6 text-primary animate-spin" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground mb-1">Loading Transactions...</h3>
+                <p className="text-sm text-muted-foreground">
+                  Fetching data. Please wait...
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Info if no transactions (only show after loading is complete) */}
+      {isConfigured && !isLoading && transactions.length === 0 && (
         <Card className="glass-card border-2 border-blue-500/60 bg-blue-50/50 animate-fade-in">
           <CardContent className="pt-6">
             <div className="flex items-start gap-4">
