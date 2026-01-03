@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card"
 import { Input } from "../components/ui/Input";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Button } from "../components/ui/Button";
-import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer, ArrowRightLeft, LogOut, Loader2 } from "lucide-react";
+import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer, ArrowRightLeft, LogOut } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Label } from "../components/ui/Label";
 import { Modal } from "../components/ui/Modal";
@@ -77,20 +77,89 @@ export function Transactions() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   // View mode for pending transactions (list or grid)
   const [pendingViewMode, setPendingViewMode] = useState<"list" | "grid">("list");
-  // Sort state for all columns
-  const [sortColumn, setSortColumn] = useState<"date" | "narration" | "amount" | "party" | "vyaparRef" | null>("date");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  // Sort state per view - stored in localStorage
+  const [sortColumn, setSortColumn] = useState<"date" | "narration" | "amount" | "party" | "vyaparRef" | null>(() => {
+    const currentView = searchParams.get('view') as ViewType | null || "pending";
+    const saved = localStorage.getItem(`transactionSort_${currentView}`);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return parsed.column || null;
+    }
+    // Default: completed view sorts by updatedAt (null means use default), others by date
+    return currentView === "completed" ? null : "date";
+  });
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(() => {
+    const currentView = searchParams.get('view') as ViewType | null || "pending";
+    const saved = localStorage.getItem(`transactionSort_${currentView}`);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return parsed.direction || "desc";
+    }
+    return "desc";
+  });
+  
+  // Update sort state when view changes
+  useEffect(() => {
+    const saved = localStorage.getItem(`transactionSort_${view}`);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setSortColumn(parsed.column || null);
+      setSortDirection(parsed.direction || "desc");
+    } else {
+      // Default: completed view sorts by updatedAt (null means use default), others by date
+      setSortColumn(view === "completed" ? null : "date");
+      setSortDirection("desc");
+    }
+  }, [view]);
+  
+  // Column widths state - stored in localStorage per view
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    // Initialize with current view (defaults to "pending")
+    const currentView = searchParams.get('view') as ViewType | null || "pending";
+    const saved = localStorage.getItem(`transactionColumnWidths_${currentView}`);
+    return saved ? JSON.parse(saved) : {};
+  });
+  
+  // Update column widths when view changes
+  useEffect(() => {
+    const saved = localStorage.getItem(`transactionColumnWidths_${view}`);
+    setColumnWidths(saved ? JSON.parse(saved) : {});
+  }, [view]);
+  
+  // Resizing state
+  const [resizingColumn, setResizingColumn] = useState<string | null>(null);
+  const [resizeStartX, setResizeStartX] = useState(0);
+  const [resizeStartWidth, setResizeStartWidth] = useState(0);
+  
+  // Selected transaction state - persists across view switches
+  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(() => {
+    // Load from localStorage on mount
+    const saved = localStorage.getItem('selectedTransactionId');
+    return saved || null;
+  });
   
   // Helper function to handle column sorting
   const handleSort = (column: "date" | "narration" | "amount" | "party" | "vyaparRef") => {
+    let newColumn: typeof column | null = column;
+    let newDirection: "asc" | "desc" = "desc";
+    
     if (sortColumn === column) {
       // Toggle direction if same column
-      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+      newDirection = sortDirection === "asc" ? "desc" : "asc";
     } else {
       // Set new column with default descending
-      setSortColumn(column);
-      setSortDirection("desc");
+      newColumn = column;
+      newDirection = "desc";
     }
+    
+    setSortColumn(newColumn);
+    setSortDirection(newDirection);
+    
+    // Save to localStorage per view
+    localStorage.setItem(`transactionSort_${view}`, JSON.stringify({
+      column: newColumn,
+      direction: newDirection
+    }));
   };
   
   // Helper function to get sort icon for a column
@@ -99,6 +168,68 @@ export function Transactions() {
       return <ArrowUpDown className="h-4 w-4 text-muted-foreground" />;
     }
     return sortDirection === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />;
+  };
+
+  // Column resize handlers
+  const handleResizeStart = (e: React.MouseEvent, columnKey: string, currentWidth: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizingColumn(columnKey);
+    setResizeStartX(e.clientX);
+    setResizeStartWidth(currentWidth);
+  };
+
+  // Use ref to capture current view during resize
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!resizingColumn) return;
+    
+    const diff = e.clientX - resizeStartX;
+    const newWidth = Math.max(50, resizeStartWidth + diff); // Minimum width 50px
+    
+    setColumnWidths(prev => {
+      const updated = { ...prev, [resizingColumn]: newWidth };
+      // Save with view-specific key using ref to get current view
+      localStorage.setItem(`transactionColumnWidths_${viewRef.current}`, JSON.stringify(updated));
+      return updated;
+    });
+  }, [resizingColumn, resizeStartX, resizeStartWidth]);
+
+  const handleResizeEnd = useCallback(() => {
+    setResizingColumn(null);
+  }, []);
+
+  // Add resize listeners
+  useEffect(() => {
+    if (resizingColumn) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      
+      return () => {
+        document.removeEventListener('mousemove', handleResizeMove);
+        document.removeEventListener('mouseup', handleResizeEnd);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+    }
+  }, [resizingColumn, handleResizeMove, handleResizeEnd]);
+
+  // Get column width helper
+  const getColumnWidth = (columnKey: string, defaultWidth: number = 150): number => {
+    return columnWidths[columnKey] || defaultWidth;
+  };
+
+  // Handle transaction selection
+  const handleSelectTransaction = (transactionId: string) => {
+    setSelectedTransactionId(transactionId);
+    // Persist to localStorage
+    localStorage.setItem('selectedTransactionId', transactionId);
   };
   // Modal state for editing transaction
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -342,8 +473,18 @@ export function Transactions() {
         return sortDirection === "asc" ? comparison : -comparison;
       });
     } else {
-      // Default: newest first by date
-      filtered = [...filtered].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      // Default sorting based on view
+      if (view === "completed") {
+        // For completed: sort by updatedAt (most recently completed first)
+        filtered = [...filtered].sort((a, b) => {
+          const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          return dateB - dateA; // Most recent first
+        });
+      } else {
+        // Default: newest first by date
+        filtered = [...filtered].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      }
     }
 
     return filtered;
@@ -362,6 +503,12 @@ export function Transactions() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, view, dateFrom, dateTo]);
+
+  // Clear selected transaction when view changes
+  useEffect(() => {
+    setSelectedTransactionId(null);
+    localStorage.removeItem('selectedTransactionId');
+  }, [view]);
 
   // Load suggestions for visible transactions when page changes or transactions load
   useEffect(() => {
@@ -1324,6 +1471,7 @@ export function Transactions() {
       
       // Update transaction with party name and Vyapar ref
       // NEVER UPDATE DATE - preserve original date
+      const now = new Date().toISOString();
       const updatedTransaction = {
         ...editingTransaction,
         partyName,
@@ -1331,6 +1479,7 @@ export function Transactions() {
         added_to_vyapar: true,
         hold: false, // Remove hold if it was on hold
         date: editingTransaction.date, // Explicitly preserve original date
+        updatedAt: now, // Set updatedAt to current time for sorting
       };
       
       // Update local state first
@@ -1346,6 +1495,7 @@ export function Transactions() {
         vyapar_reference_number: vyaparRef,
         added_to_vyapar: true,
         hold: false,
+        updatedAt: now, // Include updatedAt in the update
       }, updatedTransaction);
       
       // Learn from narration
@@ -1645,23 +1795,6 @@ export function Transactions() {
         </div>
       </div>
 
-      {/* Loading state */}
-      {isLoading && (
-        <Card className="glass-card border-2 border-primary/60 bg-primary/5 animate-fade-in">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-4">
-              <Loader2 className="h-6 w-6 text-primary animate-spin" />
-              <div className="flex-1">
-                <h3 className="font-semibold text-foreground mb-1">Loading Transactions...</h3>
-                <p className="text-sm text-muted-foreground">
-                  Fetching data. Please wait...
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Tabs - Minimal & Clean */}
       <div className="flex gap-2 border-b border-border/60 bg-card/50 rounded-t-lg p-1">
         <button
@@ -1873,120 +2006,133 @@ export function Transactions() {
         </div>
       ) : (
         // Filters for Completed and Hold Transactions
-      <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Date Range Filters */}
-            <div className="grid gap-4 md:grid-cols-5">
-            <div>
-                <Label htmlFor="dateFromCompleted">From Date (DD/MM/YYYY)</Label>
-              <DatePicker
-                id="dateFromCompleted"
-                value={dateFrom}
-                onChange={(value) => {
-                  if (view === "completed") setDateFromCompleted(value);
-                  else if (view === "hold") setDateFromHold(value);
-                  else setDateFromSelfTransfer(value);
-                }}
-                placeholder="DD/MM/YYYY"
-                className="h-9 text-sm"
-              />
-            </div>
-            <div>
-                <Label htmlFor="dateToCompleted">To Date (DD/MM/YYYY)</Label>
-              <DatePicker
-                id="dateToCompleted"
-                value={dateTo}
-                onChange={(value) => {
-                  if (view === "completed") setDateToCompleted(value);
-                  else if (view === "hold") setDateToHold(value);
-                  else setDateToSelfTransfer(value);
-                }}
-                placeholder="DD/MM/YYYY"
-                className="h-9 text-sm"
-              />
-            </div>
-            <div>
-              <Label>Actions</Label>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handlePrint}
-                disabled={filteredTransactions.length === 0}
-                className="h-9 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white w-full"
-                title="Print/Save as PDF"
-              >
-                <Printer className="h-4 w-4" />
-                Print PDF
-              </Button>
-            </div>
-              <div>
-                <Label>Sort by Date</Label>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant={sortColumn === "date" && sortDirection === "asc" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => {
-                      setSortColumn("date");
-                      setSortDirection("asc");
+        <div className="space-y-4">
+          {/* Search Filter */}
+          <Card className="border-slate-200 shadow-sm">
+            <CardContent className="p-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search transactions..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 h-9 border-2 border-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Date Range, Sort, and Actions */}
+          <Card className="border-slate-200 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex flex-wrap items-end gap-4">
+                {/* Date Range Filters */}
+                <div className="flex-1 min-w-[160px]">
+                  <Label htmlFor="dateFromCompleted" className="text-xs font-semibold mb-1.5 block">From Date (DD/MM/YYYY)</Label>
+                  <DatePicker
+                    id="dateFromCompleted"
+                    value={dateFrom}
+                    onChange={(value) => {
+                      if (view === "completed") setDateFromCompleted(value);
+                      else if (view === "hold") setDateFromHold(value);
+                      else setDateFromSelfTransfer(value);
                     }}
-                    className="flex-1"
-                  >
-                    <ArrowUp className="h-4 w-4 mr-1" />
-                    Oldest
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={sortColumn === "date" && sortDirection === "desc" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => {
-                      setSortColumn("date");
-                      setSortDirection("desc");
+                    placeholder="DD/MM/YYYY"
+                    className="h-9 text-sm w-full"
+                  />
+                </div>
+                <div className="flex-1 min-w-[160px]">
+                  <Label htmlFor="dateToCompleted" className="text-xs font-semibold mb-1.5 block">To Date (DD/MM/YYYY)</Label>
+                  <DatePicker
+                    id="dateToCompleted"
+                    value={dateTo}
+                    onChange={(value) => {
+                      if (view === "completed") setDateToCompleted(value);
+                      else if (view === "hold") setDateToHold(value);
+                      else setDateToSelfTransfer(value);
                     }}
-                    className="flex-1"
+                    placeholder="DD/MM/YYYY"
+                    className="h-9 text-sm w-full"
+                  />
+                </div>
+                
+                {/* Sort by Date */}
+                <div className="min-w-[180px]">
+                  <Label className="text-xs font-semibold mb-1.5 block">Sort by Date</Label>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant={sortColumn === "date" && sortDirection === "asc" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => {
+                        setSortColumn("date");
+                        setSortDirection("asc");
+                      }}
+                      className="flex-1 h-9"
+                    >
+                      <ArrowUp className="h-3.5 w-3.5 mr-1" />
+                      Oldest
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={sortColumn === "date" && sortDirection === "desc" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => {
+                        setSortColumn("date");
+                        setSortDirection("desc");
+                      }}
+                      className="flex-1 h-9"
+                    >
+                      <ArrowDown className="h-3.5 w-3.5 mr-1" />
+                      Newest
+                    </Button>
+                  </div>
+                </div>
+                
+                {/* Print Button */}
+                <div className="min-w-[140px]">
+                  <Label className="text-xs font-semibold mb-1.5 block">Actions</Label>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handlePrint}
+                    disabled={filteredTransactions.length === 0}
+                    className="h-9 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white w-full"
+                    title="Print/Save as PDF"
                   >
-                    <ArrowDown className="h-4 w-4 mr-1" />
-                    Newest
+                    <Printer className="h-4 w-4" />
+                    Print PDF
                   </Button>
                 </div>
-            </div>
-            <div className="flex items-end">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (view === "completed") {
-                    setDateFromCompleted("");
-                    setDateToCompleted("");
-                  } else if (view === "hold") {
-                    setDateFromHold("");
-                    setDateToHold("");
-                  } else {
-                    setDateFromSelfTransfer("");
-                    setDateToSelfTransfer("");
-                  }
-                  setSortColumn(null);
-                }}
-              >
-                  Clear All
-              </Button>
-            </div>
-          </div>
-
-          {/* Search Filter */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search transactions..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 border-2 border-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
-        </CardContent>
-      </Card>
+                
+                {/* Clear All Button */}
+                <div className="min-w-[100px]">
+                  <Label className="text-xs font-semibold mb-1.5 block opacity-0">Clear</Label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (view === "completed") {
+                        setDateFromCompleted("");
+                        setDateToCompleted("");
+                      } else if (view === "hold") {
+                        setDateFromHold("");
+                        setDateToHold("");
+                      } else {
+                        setDateFromSelfTransfer("");
+                        setDateToSelfTransfer("");
+                      }
+                      setSortColumn(null);
+                    }}
+                    className="h-9 w-full"
+                  >
+                    Clear All
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {view === "pending" ? (
@@ -2011,7 +2157,13 @@ export function Transactions() {
                     <table className="w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
-                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
+                          <th className="p-3 text-center text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300" style={{ width: '60px' }}>
+                            Select
+                          </th>
+                          <th 
+                            className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                            style={{ width: getColumnWidth('date', 120) }}
+                          >
                             <div className="flex items-center gap-2">
                               <span>Date</span>
                               <button
@@ -2023,8 +2175,19 @@ export function Transactions() {
                                 {getSortIcon("date")}
                               </button>
                             </div>
+                            <div
+                              className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleResizeStart(e, 'date', getColumnWidth('date', 120));
+                              }}
+                            />
                           </th>
-                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
+                          <th 
+                            className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                            style={{ width: getColumnWidth('narration', 300) }}
+                          >
                             <div className="flex items-center gap-2">
                               <span>Narration</span>
                               <button
@@ -2036,9 +2199,33 @@ export function Transactions() {
                                 {getSortIcon("narration")}
                               </button>
                             </div>
+                            <div
+                              className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleResizeStart(e, 'narration', getColumnWidth('narration', 300));
+                              }}
+                            />
                           </th>
-                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Bank Ref No.</th>
-                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
+                          <th 
+                            className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                            style={{ width: getColumnWidth('bankRef', 120) }}
+                          >
+                            Bank Ref No.
+                            <div
+                              className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleResizeStart(e, 'bankRef', getColumnWidth('bankRef', 120));
+                              }}
+                            />
+                          </th>
+                          <th 
+                            className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                            style={{ width: getColumnWidth('amount', 120) }}
+                          >
                             <div className="flex items-center gap-2">
                               <span>Amount</span>
                               <button
@@ -2050,30 +2237,74 @@ export function Transactions() {
                                 {getSortIcon("amount")}
                               </button>
                             </div>
+                            <div
+                              className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleResizeStart(e, 'amount', getColumnWidth('amount', 120));
+                              }}
+                            />
                           </th>
-                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Action</th>
+                          <th className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300">Action</th>
                         </tr>
                       </thead>
                       <tbody>
                         {paginatedTransactions.map((transaction) => (
                           <tr
                             key={transaction.id}
-                            className="border-b border-slate-300 bg-card hover:bg-muted/50 transition-colors"
+                            className={cn(
+                              "border-b border-slate-300 bg-card hover:bg-muted/50 transition-colors",
+                              selectedTransactionId === transaction.id && "bg-blue-50 border-blue-300 border-l-4 border-l-blue-500"
+                            )}
                           >
-                            <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap">{formatDate(transaction.date)}</td>
-                            <td className="p-3 text-sm border-r border-slate-300">{transaction.description}</td>
-                            <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
+                            <td className="p-3 text-center border-r border-slate-300" style={{ width: '60px' }}>
+                              <input
+                                type="radio"
+                                name="selectedTransaction"
+                                checked={selectedTransactionId === transaction.id}
+                                onChange={() => handleSelectTransaction(transaction.id)}
+                                className="h-4 w-4 text-primary cursor-pointer"
+                                title="Select this transaction"
+                              />
+                            </td>
+                            <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap" style={{ width: getColumnWidth('date', 120) }}>{formatDate(transaction.date)}</td>
+                            <td className="p-3 text-sm border-r border-slate-300" style={{ width: getColumnWidth('narration', 300) }}>{transaction.description}</td>
+                            <td 
+                              className="p-3 text-sm text-muted-foreground border-r border-slate-300 break-words" 
+                              style={{ 
+                                width: getColumnWidth('bankRef', 120),
+                                wordBreak: 'break-word',
+                                overflowWrap: 'break-word',
+                                maxWidth: getColumnWidth('bankRef', 120)
+                              }}
+                              title={transaction.referenceNumber || undefined}
+                            >
                               {transaction.referenceNumber || "-"}
                             </td>
-                            <td className="p-3 text-sm font-semibold text-foreground border-r border-slate-300">
+                            <td className="p-3 text-sm font-semibold text-foreground border-r border-slate-300" style={{ width: getColumnWidth('amount', 120) }}>
                               ₹{transaction.amount.toLocaleString()}
                             </td>
                             <td className="p-3">
                               <button
                                 type="button"
-                                onClick={() => handleOpenEditModal(transaction)}
-                                className="p-2 hover:bg-primary/10 rounded-md transition-colors"
-                                title="Edit transaction"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={(e) => {
+                                  if (selectedTransactionId !== transaction.id) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    return;
+                                  }
+                                  handleOpenEditModal(transaction);
+                                }}
+                                className={cn(
+                                  "flex-shrink-0 transition-opacity p-1.5 rounded border",
+                                  selectedTransactionId === transaction.id
+                                    ? "hover:opacity-80 cursor-pointer hover:bg-primary/10 border-primary/20"
+                                    : "opacity-40 cursor-not-allowed border-gray-300 bg-gray-100"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Edit transaction" : "Please select this transaction first"}
                               >
                                 <Pencil className="h-4 w-4 text-primary" />
                               </button>
@@ -2174,7 +2405,13 @@ export function Transactions() {
             <table className="w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
-                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
+                    <th className="p-3 text-center text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300" style={{ width: '60px' }}>
+                      Select
+                    </th>
+                    <th 
+                      className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                      style={{ width: getColumnWidth('date', 120) }}
+                    >
                       <div className="flex items-center gap-2">
                         <span>Date</span>
                         <button
@@ -2186,8 +2423,19 @@ export function Transactions() {
                           {getSortIcon("date")}
                         </button>
                       </div>
+                      <div
+                        className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleResizeStart(e, 'date', getColumnWidth('date', 120));
+                        }}
+                      />
                     </th>
-                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">
+                  <th 
+                    className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                    style={{ width: getColumnWidth('narration', 300) }}
+                  >
                     <div className="flex items-center gap-2">
                       <span>Narration</span>
                       <button
@@ -2199,10 +2447,34 @@ export function Transactions() {
                         {getSortIcon("narration")}
                       </button>
                     </div>
+                    <div
+                      className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleResizeStart(e, 'narration', getColumnWidth('narration', 300));
+                      }}
+                    />
                   </th>
-                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Bank Ref No.</th>
+                  <th 
+                    className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                    style={{ width: getColumnWidth('bankRef', 120) }}
+                  >
+                    Bank Ref No.
+                    <div
+                      className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleResizeStart(e, 'bankRef', getColumnWidth('bankRef', 120));
+                      }}
+                    />
+                  </th>
                   {view !== "selfTransfer" && (
-                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">
+                    <th 
+                      className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                      style={{ width: getColumnWidth('party', 150) }}
+                    >
                       <div className="flex items-center gap-2">
                         <span>Party</span>
                         <button
@@ -2214,9 +2486,20 @@ export function Transactions() {
                           {getSortIcon("party")}
                         </button>
                       </div>
+                      <div
+                        className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleResizeStart(e, 'party', getColumnWidth('party', 150));
+                        }}
+                      />
                     </th>
                   )}
-                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">
+                  <th 
+                    className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                    style={{ width: getColumnWidth('amount', 120) }}
+                  >
                     <div className="flex items-center gap-2">
                       <span>Amount</span>
                       <button
@@ -2228,9 +2511,20 @@ export function Transactions() {
                         {getSortIcon("amount")}
                       </button>
                     </div>
+                    <div
+                      className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleResizeStart(e, 'amount', getColumnWidth('amount', 120));
+                      }}
+                    />
                   </th>
                   {(view !== "hold" && view !== "selfTransfer") && (
-                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">
+                    <th 
+                      className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                      style={{ width: getColumnWidth('vyaparRef', 150) }}
+                    >
                       <div className="flex items-center gap-2">
                         <span>Vyapar Ref No.</span>
                         <button
@@ -2242,15 +2536,23 @@ export function Transactions() {
                           {getSortIcon("vyaparRef")}
                         </button>
                       </div>
+                      <div
+                        className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleResizeStart(e, 'vyaparRef', getColumnWidth('vyaparRef', 150));
+                        }}
+                      />
                     </th>
                   )}
-                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Actions</th>
+                    <th className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredTransactions.length === 0 ? (
                   <tr>
-                      <td colSpan={view === "selfTransfer" ? 5 : view === "hold" ? 6 : 7} className="p-8 text-center text-muted-foreground border-b border-slate-300">
+                      <td colSpan={view === "selfTransfer" ? 7 : view === "hold" ? 8 : 9} className="p-8 text-center text-muted-foreground border-b border-slate-300">
                       No transactions found
                     </td>
                   </tr>
@@ -2270,16 +2572,36 @@ export function Transactions() {
                           "border-b border-slate-300 bg-card hover:bg-muted/50 transition-colors group",
                           transaction.hold && "bg-yellow-50",
                           transaction.selfTransfer && "bg-purple-50",
-                          !transaction.hold && !transaction.selfTransfer && isAdded && "bg-green-50"
+                          !transaction.hold && !transaction.selfTransfer && isAdded && "bg-green-50",
+                          selectedTransactionId === transaction.id && "bg-blue-50 border-blue-300 border-l-4 border-l-blue-500"
                         )}
                       >
-                        <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap">{formatDate(transaction.date)}</td>
-                        <td className="p-3 text-sm border-r border-slate-300">{transaction.description}</td>
-                        <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
+                        <td className="p-3 text-center border-r border-slate-300" style={{ width: '60px' }}>
+                          <input
+                            type="radio"
+                            name="selectedTransaction"
+                            checked={selectedTransactionId === transaction.id}
+                            onChange={() => handleSelectTransaction(transaction.id)}
+                            className="h-4 w-4 text-primary cursor-pointer"
+                            title="Select this transaction"
+                          />
+                        </td>
+                        <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap" style={{ width: getColumnWidth('date', 120) }}>{formatDate(transaction.date)}</td>
+                        <td className="p-3 text-sm border-r border-slate-300" style={{ width: getColumnWidth('narration', 300) }}>{transaction.description}</td>
+                        <td 
+                          className="p-3 text-sm text-muted-foreground border-r border-slate-300 break-words" 
+                          style={{ 
+                            width: getColumnWidth('bankRef', 120),
+                            wordBreak: 'break-word',
+                            overflowWrap: 'break-word',
+                            maxWidth: getColumnWidth('bankRef', 120)
+                          }}
+                          title={transaction.referenceNumber || undefined}
+                        >
                           {transaction.referenceNumber || "-"}
                         </td>
                         {view !== "selfTransfer" && (
-                          <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
+                          <td className="p-3 text-sm text-muted-foreground border-r border-slate-300" style={{ width: getColumnWidth('party', 150) }}>
                             <div className="flex items-center gap-2">
                               {(() => {
                               // Check if transaction is completed
@@ -2420,11 +2742,11 @@ export function Transactions() {
                           </div>
                         </td>
                         )}
-                        <td className="p-3 text-sm font-semibold text-green-600 border-r border-slate-300">
+                        <td className="p-3 text-sm font-semibold text-green-600 border-r border-slate-300" style={{ width: getColumnWidth('amount', 120) }}>
                           ₹{transaction.amount.toLocaleString()}
                         </td>
                         {(view !== "hold" && view !== "selfTransfer") && (
-                          <td className="p-3 border-r border-slate-300">
+                          <td className="p-3 border-r border-slate-300" style={{ width: getColumnWidth('vyaparRef', 150) }}>
                             <div className="flex items-center gap-2">
                               {(() => {
                                 // Check if transaction is completed
@@ -2585,20 +2907,32 @@ export function Transactions() {
                             {(() => {
                               const hasPartyName = Boolean(transaction.partyName && transaction.partyName.trim() !== '');
                               const isCompleted = isAdded && hasReference && hasPartyName;
+                              const isSelected = selectedTransactionId === transaction.id;
                               
                               // Show cancel button only for completed transactions
                               if (isCompleted && view === "completed") {
                                 return (
                                   <button
                                     type="button"
+                                    disabled={!isSelected}
                                     onMouseDown={(e) => e.preventDefault()}
                                     onClick={(e) => {
+                                      if (!isSelected) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        return;
+                                      }
                                       e.preventDefault();
                                       e.stopPropagation();
                                       handleCancel(transaction.id);
                                     }}
-                                    className="flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer p-1.5 hover:bg-red-50 rounded border border-red-200"
-                                    title="Cancel transaction and move back to pending"
+                                    className={cn(
+                                      "flex-shrink-0 transition-opacity p-1.5 rounded border",
+                                      isSelected 
+                                        ? "hover:opacity-80 cursor-pointer hover:bg-red-50 border-red-200" 
+                                        : "opacity-40 cursor-not-allowed border-gray-300 bg-gray-100"
+                                    )}
+                                    title={isSelected ? "Cancel transaction and move back to pending" : "Please select this transaction first"}
                                   >
                                     <X className="h-5 w-5 text-red-600" />
                                   </button>
@@ -2611,20 +2945,40 @@ export function Transactions() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleUnhold(transaction.id)}
-                                className="p-2 bg-yellow-50 hover:bg-yellow-100"
-                                title="Unhold"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onClick={() => {
+                                  if (selectedTransactionId === transaction.id) {
+                                    handleUnhold(transaction.id);
+                                  }
+                                }}
+                                className={cn(
+                                  "p-2",
+                                  selectedTransactionId === transaction.id
+                                    ? "bg-yellow-50 hover:bg-yellow-100"
+                                    : "bg-gray-100 opacity-40 cursor-not-allowed"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Unhold" : "Please select this transaction first"}
                               >
-                                <XCircle className="h-4 w-4 text-yellow-700" />
+                                <X className="h-4 w-4 text-red-600" />
                               </Button>
                             ) : (
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleSetHold(transaction.id)}
-                                className="p-2 bg-yellow-50 hover:bg-yellow-100"
-                                title="Hold"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onClick={() => {
+                                  if (selectedTransactionId === transaction.id) {
+                                    handleSetHold(transaction.id);
+                                  }
+                                }}
+                                className={cn(
+                                  "p-2",
+                                  selectedTransactionId === transaction.id
+                                    ? "bg-yellow-50 hover:bg-yellow-100"
+                                    : "bg-gray-100 opacity-40 cursor-not-allowed"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Hold" : "Please select this transaction first"}
                               >
                                 <Clock className="h-4 w-4 text-yellow-700" />
                               </Button>
@@ -2634,20 +2988,40 @@ export function Transactions() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleUnsetSelfTransfer(transaction.id)}
-                                className="p-2 bg-purple-50 hover:bg-purple-100"
-                                title="Remove Self Transfer"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onClick={() => {
+                                  if (selectedTransactionId === transaction.id) {
+                                    handleUnsetSelfTransfer(transaction.id);
+                                  }
+                                }}
+                                className={cn(
+                                  "p-2",
+                                  selectedTransactionId === transaction.id
+                                    ? "bg-purple-50 hover:bg-purple-100"
+                                    : "bg-gray-100 opacity-40 cursor-not-allowed"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Remove Self Transfer" : "Please select this transaction first"}
                               >
-                                <XCircle className="h-4 w-4 text-purple-700" />
+                                <X className="h-4 w-4 text-red-600" />
                               </Button>
                             ) : (
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleSetSelfTransfer(transaction.id)}
-                                className="p-2 bg-purple-50 hover:bg-purple-100"
-                                title="Self Transfer"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onClick={() => {
+                                  if (selectedTransactionId === transaction.id) {
+                                    handleSetSelfTransfer(transaction.id);
+                                  }
+                                }}
+                                className={cn(
+                                  "p-2",
+                                  selectedTransactionId === transaction.id
+                                    ? "bg-purple-50 hover:bg-purple-100"
+                                    : "bg-gray-100 opacity-40 cursor-not-allowed"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Self Transfer" : "Please select this transaction first"}
                               >
                                 <ArrowRightLeft className="h-4 w-4 text-purple-700" />
                               </Button>

@@ -1,5 +1,4 @@
 import { ReactNode, useEffect } from "react";
-import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "./Button";
@@ -16,41 +15,19 @@ export function Modal({ isOpen, onClose, title, children, className }: ModalProp
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden";
-      document.documentElement.style.overflow = "hidden";
-      // Remove any margins/padding that might cause gaps
-      const originalBodyMargin = document.body.style.margin;
-      const originalHtmlMargin = document.documentElement.style.margin;
-      document.body.style.margin = "0";
-      document.documentElement.style.margin = "0";
-      
-      return () => {
-        document.body.style.overflow = "";
-        document.documentElement.style.overflow = "";
-        document.body.style.margin = originalBodyMargin;
-        document.documentElement.style.margin = originalHtmlMargin;
-      };
     } else {
       document.body.style.overflow = "";
-      document.documentElement.style.overflow = "";
     }
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const modalContent = (
+  return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        width: '100vw',
-        height: '100vh',
-        margin: 0,
-        padding: 0,
-      }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -74,7 +51,5 @@ export function Modal({ isOpen, onClose, title, children, className }: ModalProp
       </div>
     </div>
   );
-
-  return createPortal(modalContent, document.body);
 }
 
