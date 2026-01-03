@@ -1086,7 +1086,7 @@ export function scorePartyMatch(narration: string, partyName: string): number {
   const partyWords = partyLower
     .split(/\s+/)
     .filter(word => word.length > 2) // Only consider words longer than 2 characters
-    .filter(word => !/^(pvt|ltd|limited|private|inc|incorporated|llp|llc|and|the|of|for|to|in|on|at|by|with|from|hospital|hospitals)$/i.test(word)); // Filter common business words and "hospital"/"hospitals"
+    .filter(word => !/^(pvt|ltd|limited|private|inc|incorporated|llp|llc|and|the|of|for|to|in|on|at|by|with|from|hospital|hospitals|health|care|healthcare)$/i.test(word)); // Filter common business words, "hospital"/"hospitals", and "health care"/"healthcare"
   
   // If no significant words, return 0
   if (partyWords.length === 0) return 0;
