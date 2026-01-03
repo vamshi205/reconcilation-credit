@@ -1740,33 +1740,33 @@ export function Transactions() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-4xl font-display font-bold text-gradient">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div className="flex-1">
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-display font-bold text-gradient">
             Transactions
           </h1>
-          <p className="text-muted-foreground mt-2">
-            Manage deposit transactions and track Vyapar entries
-            <span className="ml-2 px-2 py-1 bg-secondary text-secondary-foreground rounded-full text-sm font-medium">
+          <p className="text-muted-foreground mt-2 text-sm sm:text-base">
+            <span className="block sm:inline">Manage deposit transactions and track Vyapar entries</span>
+            <span className="ml-0 sm:ml-2 mt-1 sm:mt-0 inline-block px-2 py-1 bg-secondary text-secondary-foreground rounded-full text-xs sm:text-sm font-medium">
               {filteredTransactions.length} found
             </span>
             {isGoogleSheetsConfigured() && lastSyncTime && (
-              <span className="ml-3 text-sm text-slate-500">
+              <span className="block sm:inline sm:ml-3 mt-1 sm:mt-0 text-xs sm:text-sm text-slate-500">
                 • Last synced: {lastSyncTime.toLocaleTimeString()}
               </span>
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {isGoogleSheetsConfigured() && (
             <Button
               variant="outline"
               onClick={loadTransactions}
               disabled={isLoading}
-              className="flex items-center gap-2 border-slate-300 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 shadow-sm"
+              className="flex items-center gap-1 sm:gap-2 border-slate-300 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 shadow-sm text-xs sm:text-sm px-2 sm:px-4"
             >
-              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-              {isLoading ? 'Loading...' : 'Refresh'}
+              <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{isLoading ? 'Loading...' : 'Refresh'}</span>
             </Button>
           )}
           <Button
@@ -1787,20 +1787,21 @@ export function Transactions() {
                 }
               });
             }}
-            className="flex items-center gap-2 border-slate-300 hover:bg-red-50 hover:border-red-400 hover:text-red-700 shadow-sm"
+            className="flex items-center gap-1 sm:gap-2 border-slate-300 hover:bg-red-50 hover:border-red-400 hover:text-red-700 shadow-sm px-2 sm:px-4"
             title="Logout"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">Logout</span>
           </Button>
         </div>
       </div>
 
       {/* Tabs - Minimal & Clean */}
-      <div className="flex gap-2 border-b border-border/60 bg-card/50 rounded-t-lg p-1">
+      <div className="flex gap-1 sm:gap-2 border-b border-border/60 bg-card/50 rounded-t-lg p-1 overflow-x-auto">
         <button
           onClick={() => setView("pending")}
           className={cn(
-            "px-6 py-3 font-semibold rounded-lg transition-all duration-200 relative",
+            "px-3 sm:px-4 md:px-6 py-2 sm:py-2.5 md:py-3 font-semibold rounded-lg transition-all duration-200 relative text-xs sm:text-sm whitespace-nowrap flex-shrink-0",
             view === "pending"
               ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
@@ -1808,7 +1809,7 @@ export function Transactions() {
         >
           Pending
           {view === "pending" && filteredTransactions.length > 0 && (
-            <span className="ml-2 px-2 py-0.5 bg-primary-foreground/20 rounded-full text-xs font-bold">
+            <span className="ml-1 sm:ml-2 px-1.5 sm:px-2 py-0.5 bg-primary-foreground/20 rounded-full text-xs font-bold">
               {filteredTransactions.length}
             </span>
           )}
@@ -1816,7 +1817,7 @@ export function Transactions() {
         <button
           onClick={() => setView("completed")}
           className={cn(
-            "px-6 py-3 font-semibold rounded-lg transition-all duration-200",
+            "px-3 sm:px-4 md:px-6 py-2 sm:py-2.5 md:py-3 font-semibold rounded-lg transition-all duration-200 text-xs sm:text-sm whitespace-nowrap flex-shrink-0",
             view === "completed"
               ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
@@ -1827,7 +1828,7 @@ export function Transactions() {
         <button
           onClick={() => setView("hold")}
           className={cn(
-            "px-6 py-3 font-semibold rounded-lg transition-all duration-200",
+            "px-3 sm:px-4 md:px-6 py-2 sm:py-2.5 md:py-3 font-semibold rounded-lg transition-all duration-200 text-xs sm:text-sm whitespace-nowrap flex-shrink-0",
             view === "hold"
               ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
@@ -1838,13 +1839,14 @@ export function Transactions() {
         <button
           onClick={() => setView("selfTransfer")}
           className={cn(
-            "px-6 py-3 font-semibold rounded-lg transition-all duration-200",
+            "px-3 sm:px-4 md:px-6 py-2 sm:py-2.5 md:py-3 font-semibold rounded-lg transition-all duration-200 text-xs sm:text-sm whitespace-nowrap flex-shrink-0",
             view === "selfTransfer"
               ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
           )}
         >
-          Self Transfer
+          <span className="hidden sm:inline">Self Transfer</span>
+          <span className="sm:hidden">Self</span>
         </button>
       </div>
 
@@ -1854,7 +1856,7 @@ export function Transactions() {
           {/* Stats & Search Bar */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Stats Cards - Compact */}
-            <div className="lg:col-span-2 grid grid-cols-2 gap-3">
+            <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Card className="glass-card border border-border/60 animate-scale-in">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
@@ -1934,9 +1936,9 @@ export function Transactions() {
           {/* Date Range Filter - Compact */}
           <Card className="glass-card border border-border/60">
             <CardContent className="p-3">
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="flex-1 min-w-[160px]">
-                  <Label htmlFor="dateFrom" className="text-xs font-semibold mb-1.5 block">From Date (DD/MM/YYYY)</Label>
+              <div className="flex flex-col sm:flex-row flex-wrap items-end gap-3 sm:gap-2">
+                <div className="w-full sm:flex-1 sm:min-w-[140px]">
+                  <Label htmlFor="dateFrom" className="text-xs font-semibold mb-1.5 block">From Date</Label>
                   <DatePicker
                     id="dateFrom"
                     value={dateFrom}
@@ -1947,11 +1949,11 @@ export function Transactions() {
                       else setDateFromSelfTransfer(value);
                     }}
                     placeholder="DD/MM/YYYY"
-                    className="h-9 text-sm"
+                    className="h-9 text-sm w-full"
                   />
                 </div>
-                <div className="flex-1 min-w-[160px]">
-                  <Label htmlFor="dateTo" className="text-xs font-semibold mb-1.5 block">To Date (DD/MM/YYYY)</Label>
+                <div className="w-full sm:flex-1 sm:min-w-[140px]">
+                  <Label htmlFor="dateTo" className="text-xs font-semibold mb-1.5 block">To Date</Label>
                   <DatePicker
                     id="dateTo"
                     value={dateTo}
@@ -1962,44 +1964,47 @@ export function Transactions() {
                       else setDateToSelfTransfer(value);
                     }}
                     placeholder="DD/MM/YYYY"
-                    className="h-9 text-sm"
+                    className="h-9 text-sm w-full"
                   />
                 </div>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={handlePrint}
-                  disabled={filteredTransactions.length === 0}
-                  className="h-9 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-                  title="Print/Save as PDF"
-                >
-                  <Printer className="h-4 w-4" />
-                  Print PDF
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    if (view === "pending") {
-                      setDateFromPending("");
-                      setDateToPending("");
-                    } else if (view === "completed") {
-                      setDateFromCompleted("");
-                      setDateToCompleted("");
-                    } else if (view === "hold") {
-                      setDateFromHold("");
-                      setDateToHold("");
-                    } else {
-                      setDateFromSelfTransfer("");
-                      setDateToSelfTransfer("");
-                    }
-                    setSortColumn("date");
-                    setSortDirection("desc");
-                  }}
-                  className="h-9"
-                >
-                  Clear
-                </Button>
+                <div className="w-full sm:w-auto flex gap-2">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handlePrint}
+                    disabled={filteredTransactions.length === 0}
+                    className="h-9 flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm"
+                    title="Print/Save as PDF"
+                  >
+                    <Printer className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Print PDF</span>
+                    <span className="sm:hidden">Print</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (view === "pending") {
+                        setDateFromPending("");
+                        setDateToPending("");
+                      } else if (view === "completed") {
+                        setDateFromCompleted("");
+                        setDateToCompleted("");
+                      } else if (view === "hold") {
+                        setDateFromHold("");
+                        setDateToHold("");
+                      } else {
+                        setDateFromSelfTransfer("");
+                        setDateToSelfTransfer("");
+                      }
+                      setSortColumn("date");
+                      setSortDirection("desc");
+                    }}
+                    className="h-9 text-xs sm:text-sm"
+                  >
+                    Clear
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -2025,10 +2030,10 @@ export function Transactions() {
           {/* Date Range, Sort, and Actions */}
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4">
-              <div className="flex flex-wrap items-end gap-4">
+              <div className="flex flex-col sm:flex-row flex-wrap items-end gap-3 sm:gap-4">
                 {/* Date Range Filters */}
-                <div className="flex-1 min-w-[160px]">
-                  <Label htmlFor="dateFromCompleted" className="text-xs font-semibold mb-1.5 block">From Date (DD/MM/YYYY)</Label>
+                <div className="w-full sm:flex-1 sm:min-w-[140px]">
+                  <Label htmlFor="dateFromCompleted" className="text-xs font-semibold mb-1.5 block">From Date</Label>
                   <DatePicker
                     id="dateFromCompleted"
                     value={dateFrom}
@@ -2041,15 +2046,15 @@ export function Transactions() {
                     className="h-9 text-sm w-full"
                   />
                 </div>
-                <div className="flex-1 min-w-[160px]">
-                  <Label htmlFor="dateToCompleted" className="text-xs font-semibold mb-1.5 block">To Date (DD/MM/YYYY)</Label>
+                <div className="w-full sm:flex-1 sm:min-w-[140px]">
+                  <Label htmlFor="dateToCompleted" className="text-xs font-semibold mb-1.5 block">To Date</Label>
                   <DatePicker
                     id="dateToCompleted"
                     value={dateTo}
                     onChange={(value) => {
                       if (view === "completed") setDateToCompleted(value);
                       else if (view === "hold") setDateToHold(value);
-                      else setDateToSelfTransfer(value);
+                      else setDateFromSelfTransfer(value);
                     }}
                     placeholder="DD/MM/YYYY"
                     className="h-9 text-sm w-full"
@@ -2057,7 +2062,7 @@ export function Transactions() {
                 </div>
                 
                 {/* Sort by Date */}
-                <div className="min-w-[180px]">
+                <div className="w-full sm:w-auto sm:min-w-[160px]">
                   <Label className="text-xs font-semibold mb-1.5 block">Sort by Date</Label>
                   <div className="flex items-center gap-2">
                     <Button
@@ -2068,7 +2073,7 @@ export function Transactions() {
                         setSortColumn("date");
                         setSortDirection("asc");
                       }}
-                      className="flex-1 h-9"
+                      className="flex-1 h-9 text-xs sm:text-sm"
                     >
                       <ArrowUp className="h-3.5 w-3.5 mr-1" />
                       Oldest
@@ -2081,7 +2086,7 @@ export function Transactions() {
                         setSortColumn("date");
                         setSortDirection("desc");
                       }}
-                      className="flex-1 h-9"
+                      className="flex-1 h-9 text-xs sm:text-sm"
                     >
                       <ArrowDown className="h-3.5 w-3.5 mr-1" />
                       Newest
@@ -2090,23 +2095,24 @@ export function Transactions() {
                 </div>
                 
                 {/* Print Button */}
-                <div className="min-w-[140px]">
+                <div className="w-full sm:w-auto sm:min-w-[120px]">
                   <Label className="text-xs font-semibold mb-1.5 block">Actions</Label>
                   <Button
                     variant="default"
                     size="sm"
                     onClick={handlePrint}
                     disabled={filteredTransactions.length === 0}
-                    className="h-9 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white w-full"
+                    className="h-9 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white w-full text-xs sm:text-sm"
                     title="Print/Save as PDF"
                   >
-                    <Printer className="h-4 w-4" />
-                    Print PDF
+                    <Printer className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Print PDF</span>
+                    <span className="sm:hidden">Print</span>
                   </Button>
                 </div>
                 
                 {/* Clear All Button */}
-                <div className="min-w-[100px]">
+                <div className="w-full sm:w-auto sm:min-w-[90px]">
                   <Label className="text-xs font-semibold mb-1.5 block opacity-0">Clear</Label>
                   <Button
                     variant="outline"
@@ -2124,7 +2130,7 @@ export function Transactions() {
                       }
                       setSortColumn(null);
                     }}
-                    className="h-9 w-full"
+                    className="h-9 w-full text-xs sm:text-sm"
                   >
                     Clear All
                   </Button>
@@ -2157,11 +2163,11 @@ export function Transactions() {
                     <table className="w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
-                          <th className="p-3 text-center text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300" style={{ width: '60px' }}>
+                          <th className="p-2 sm:p-3 text-center text-xs sm:text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300" style={{ width: '60px' }}>
                             Select
                           </th>
                           <th 
-                            className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                            className="p-2 sm:p-3 text-left text-xs sm:text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
                             style={{ width: getColumnWidth('date', 120) }}
                           >
                             <div className="flex items-center gap-2">
@@ -2268,10 +2274,10 @@ export function Transactions() {
                                 title="Select this transaction"
                               />
                             </td>
-                            <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap" style={{ width: getColumnWidth('date', 120) }}>{formatDate(transaction.date)}</td>
-                            <td className="p-3 text-sm border-r border-slate-300" style={{ width: getColumnWidth('narration', 300) }}>{transaction.description}</td>
+                            <td className="p-2 sm:p-3 text-xs sm:text-sm border-r border-slate-300 whitespace-nowrap" style={{ width: getColumnWidth('date', 120) }}>{formatDate(transaction.date)}</td>
+                            <td className="p-2 sm:p-3 text-xs sm:text-sm border-r border-slate-300" style={{ width: getColumnWidth('narration', 300) }}>{transaction.description}</td>
                             <td 
-                              className="p-3 text-sm text-muted-foreground border-r border-slate-300 break-words" 
+                              className="p-2 sm:p-3 text-xs sm:text-sm text-muted-foreground border-r border-slate-300 break-words" 
                               style={{ 
                                 width: getColumnWidth('bankRef', 120),
                                 wordBreak: 'break-word',
@@ -2282,7 +2288,7 @@ export function Transactions() {
                             >
                               {transaction.referenceNumber || "-"}
                             </td>
-                            <td className="p-3 text-sm font-semibold text-foreground border-r border-slate-300" style={{ width: getColumnWidth('amount', 120) }}>
+                            <td className="p-2 sm:p-3 text-xs sm:text-sm font-semibold text-foreground border-r border-slate-300" style={{ width: getColumnWidth('amount', 120) }}>
                               ₹{transaction.amount.toLocaleString()}
                             </td>
                             <td className="p-3">
@@ -2405,11 +2411,11 @@ export function Transactions() {
             <table className="w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
-                    <th className="p-3 text-center text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300" style={{ width: '60px' }}>
+                    <th className="p-2 sm:p-3 text-center text-xs sm:text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300" style={{ width: '60px' }}>
                       Select
                     </th>
                     <th 
-                      className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
+                      className="p-2 sm:p-3 text-left text-xs sm:text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
                       style={{ width: getColumnWidth('date', 120) }}
                     >
                       <div className="flex items-center gap-2">
@@ -2586,10 +2592,10 @@ export function Transactions() {
                             title="Select this transaction"
                           />
                         </td>
-                        <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap" style={{ width: getColumnWidth('date', 120) }}>{formatDate(transaction.date)}</td>
-                        <td className="p-3 text-sm border-r border-slate-300" style={{ width: getColumnWidth('narration', 300) }}>{transaction.description}</td>
+                        <td className="p-2 sm:p-3 text-xs sm:text-sm border-r border-slate-300 whitespace-nowrap" style={{ width: getColumnWidth('date', 120) }}>{formatDate(transaction.date)}</td>
+                        <td className="p-2 sm:p-3 text-xs sm:text-sm border-r border-slate-300" style={{ width: getColumnWidth('narration', 300) }}>{transaction.description}</td>
                         <td 
-                          className="p-3 text-sm text-muted-foreground border-r border-slate-300 break-words" 
+                          className="p-2 sm:p-3 text-xs sm:text-sm text-muted-foreground border-r border-slate-300 break-words" 
                           style={{ 
                             width: getColumnWidth('bankRef', 120),
                             wordBreak: 'break-word',
@@ -2601,7 +2607,7 @@ export function Transactions() {
                           {transaction.referenceNumber || "-"}
                         </td>
                         {view !== "selfTransfer" && (
-                          <td className="p-3 text-sm text-muted-foreground border-r border-slate-300" style={{ width: getColumnWidth('party', 150) }}>
+                          <td className="p-2 sm:p-3 text-xs sm:text-sm text-muted-foreground border-r border-slate-300" style={{ width: getColumnWidth('party', 150) }}>
                             <div className="flex items-center gap-2">
                               {(() => {
                               // Check if transaction is completed
@@ -2742,7 +2748,7 @@ export function Transactions() {
                           </div>
                         </td>
                         )}
-                        <td className="p-3 text-sm font-semibold text-green-600 border-r border-slate-300" style={{ width: getColumnWidth('amount', 120) }}>
+                        <td className="p-2 sm:p-3 text-xs sm:text-sm font-semibold text-green-600 border-r border-slate-300" style={{ width: getColumnWidth('amount', 120) }}>
                           ₹{transaction.amount.toLocaleString()}
                         </td>
                         {(view !== "hold" && view !== "selfTransfer") && (
