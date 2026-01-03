@@ -1,16 +1,17 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Transaction } from "../types/transaction";
 import { StorageService } from "../services/storageService";
 import { PartyMappingService } from "../services/partyMappingService";
 import { fetchDebitTransactionsFromSheets, isGoogleSheetsConfigured } from "../services/googleSheetsService";
+import { AuthService } from "../services/authService";
 import { formatDate } from "../lib/utils";
 import { DatePicker } from "../components/ui/DatePicker";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Button } from "../components/ui/Button";
-import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer } from "lucide-react";
+import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer, LogOut } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Label } from "../components/ui/Label";
 import { Modal } from "../components/ui/Modal";
@@ -19,6 +20,7 @@ type ViewType = "pending" | "completed" | "hold" | "selfTransfer";
 
 export function DebitTransactions() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [view, setView] = useState<ViewType>("pending");
@@ -77,6 +79,17 @@ export function DebitTransactions() {
   const [pendingViewMode, setPendingViewMode] = useState<"list" | "grid">("list");
   // Sort state for date field
   const [dateSort, setDateSort] = useState<"asc" | "desc" | null>(null);
+  // Confirmation modal state
+  const [confirmationModal, setConfirmationModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    icon: React.ReactNode;
+    onConfirm: () => void;
+    confirmText?: string;
+    cancelText?: string;
+    variant?: 'warning' | 'info' | 'danger';
+  } | null>(null);
   // Modal state for editing transaction
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalPartyName, setModalPartyName] = useState("");
@@ -1445,17 +1458,42 @@ export function DebitTransactions() {
             )}
           </p>
         </div>
-        {isGoogleSheetsConfigured() && (
+        <div className="flex items-center gap-2">
+          {isGoogleSheetsConfigured() && (
+            <Button
+              variant="outline"
+              onClick={loadTransactions}
+              disabled={isLoading}
+              className="flex items-center gap-2 border-slate-300 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 shadow-sm"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              {isLoading ? 'Loading...' : 'Refresh'}
+            </Button>
+          )}
           <Button
             variant="outline"
-            onClick={loadTransactions}
-            disabled={isLoading}
-            className="flex items-center gap-2 border-slate-300 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 shadow-sm"
+            onClick={() => {
+              setConfirmationModal({
+                isOpen: true,
+                title: "Logout",
+                message: `Are you sure you want to logout?\n\n` +
+                  `You will be redirected to the login page.`,
+                icon: <LogOut className="h-8 w-8 text-red-600" />,
+                variant: 'danger',
+                confirmText: "Yes, Logout",
+                cancelText: "Cancel",
+                onConfirm: () => {
+                  AuthService.logout();
+                  navigate("/login", { replace: true });
+                }
+              });
+            }}
+            className="flex items-center gap-2 border-slate-300 hover:bg-red-50 hover:border-red-400 hover:text-red-700 shadow-sm"
+            title="Logout"
           >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            {isLoading ? 'Loading...' : 'Refresh'}
+            <LogOut className="h-4 w-4" />
           </Button>
-        )}
+        </div>
       </div>
 
       {/* Tabs - Minimal & Clean */}
@@ -2542,6 +2580,60 @@ export function DebitTransactions() {
           </div>
         )}
       </Modal>
+
+      {/* Confirmation Modal */}
+      {confirmationModal && (
+        <Modal
+          isOpen={confirmationModal.isOpen}
+          onClose={() => setConfirmationModal(null)}
+          title=""
+        >
+          <div className="space-y-6">
+            {/* Icon and Title */}
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className={cn(
+                "p-4 rounded-full",
+                confirmationModal.variant === 'warning' && "bg-yellow-100",
+                confirmationModal.variant === 'info' && "bg-blue-100",
+                confirmationModal.variant === 'danger' && "bg-red-100"
+              )}>
+                {confirmationModal.icon}
+              </div>
+              <h3 className="text-2xl font-bold text-foreground">
+                {confirmationModal.title}
+              </h3>
+            </div>
+
+            {/* Message */}
+            <div className="text-center">
+              <p className="text-muted-foreground whitespace-pre-line leading-relaxed">
+                {confirmationModal.message}
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmationModal(null)}
+              >
+                {confirmationModal.cancelText || "Cancel"}
+              </Button>
+              <Button
+                onClick={confirmationModal.onConfirm}
+                className={cn(
+                  confirmationModal.variant === 'warning' && "bg-yellow-600 hover:bg-yellow-700",
+                  confirmationModal.variant === 'info' && "bg-blue-600 hover:bg-blue-700",
+                  confirmationModal.variant === 'danger' && "bg-red-600 hover:bg-red-700",
+                  !confirmationModal.variant && "btn-gradient"
+                )}
+              >
+                {confirmationModal.confirmText || "Confirm"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

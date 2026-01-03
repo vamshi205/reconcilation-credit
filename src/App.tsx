@@ -11,6 +11,7 @@ import { Reconciliation } from "./pages/Reconciliation";
 import { Parties } from "./pages/Parties";
 import { Suppliers } from "./pages/Suppliers";
 import { PartyMappings } from "./pages/PartyMappings";
+import { SupplierMappings } from "./pages/SupplierMappings";
 
 function App() {
   return (
@@ -38,6 +39,7 @@ function App() {
                       <Route path="/parties" element={<Parties />} />
                       <Route path="/suppliers" element={<Suppliers />} />
                       <Route path="/party-mappings" element={<PartyMappings />} />
+                      <Route path="/supplier-mappings" element={<SupplierMappings />} />
                     </Routes>
                   </div>
                 </main>

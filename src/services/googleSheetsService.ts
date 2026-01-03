@@ -27,6 +27,16 @@ export interface PartyNameMapping {
   createdAt: string;
 }
 
+// Supplier Name Mapping interface (similar to PartyNameMapping)
+export interface SupplierNameMapping {
+  id: string;
+  originalName: string;
+  correctedName: string;
+  confidence: number;
+  lastUsed: string;
+  createdAt: string;
+}
+
 /**
  * Check if a Vyapar reference number already exists in the system
  * Returns the transaction ID if duplicate found, null otherwise
@@ -1076,7 +1086,7 @@ export function scorePartyMatch(narration: string, partyName: string): number {
   const partyWords = partyLower
     .split(/\s+/)
     .filter(word => word.length > 2) // Only consider words longer than 2 characters
-    .filter(word => !/^(pvt|ltd|limited|private|inc|incorporated|llp|llc|and|the|of|for|to|in|on|at|by|with|from)$/i.test(word)); // Filter common business words
+    .filter(word => !/^(pvt|ltd|limited|private|inc|incorporated|llp|llc|and|the|of|for|to|in|on|at|by|with|from|hospital|hospitals)$/i.test(word)); // Filter common business words and "hospital"/"hospitals"
   
   // If no significant words, return 0
   if (partyWords.length === 0) return 0;
@@ -1179,6 +1189,172 @@ export async function copyTransactionsToClipboard(transactions: Transaction[]): 
   } catch (error) {
     console.error('Failed to copy to clipboard:', error);
     throw error;
+  }
+}
+
+/**
+ * Save supplier mapping to Google Sheets
+ */
+export async function saveSupplierMappingToSheets(mapping: SupplierNameMapping): Promise<boolean> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    console.warn('Google Apps Script URL not configured. Skipping supplier mapping save.');
+    return false;
+  }
+
+  try {
+    const rowData = [
+      mapping.id,
+      mapping.originalName,
+      mapping.correctedName,
+      mapping.confidence,
+      mapping.lastUsed,
+      mapping.createdAt,
+    ];
+
+    return new Promise((resolve) => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.name = 'google-sheets-iframe-supplier-mapping-' + Date.now();
+      document.body.appendChild(iframe);
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = APPS_SCRIPT_URL;
+      form.target = iframe.name;
+      form.enctype = 'application/x-www-form-urlencoded';
+      form.style.display = 'none';
+
+      const payload = {
+        action: 'appendSupplierMapping',
+        data: JSON.stringify(rowData),
+      };
+
+      Object.keys(payload).forEach(key => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = payload[key as keyof typeof payload];
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+
+      setTimeout(() => {
+        try {
+          if (document.body.contains(form)) document.body.removeChild(form);
+          if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        } catch (e) {}
+        resolve(true);
+      }, 2000);
+    });
+  } catch (error) {
+    console.error('Error saving supplier mapping to Google Sheets:', error);
+    return false;
+  }
+}
+
+/**
+ * Update supplier mapping in Google Sheets
+ */
+export async function updateSupplierMappingInSheets(mapping: SupplierNameMapping): Promise<boolean> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    return false;
+  }
+
+  try {
+    const rowData = [
+      mapping.id,
+      mapping.originalName,
+      mapping.correctedName,
+      mapping.confidence,
+      mapping.lastUsed,
+      mapping.createdAt,
+    ];
+
+    return new Promise((resolve) => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.name = 'google-sheets-iframe-update-supplier-mapping-' + Date.now();
+      document.body.appendChild(iframe);
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = APPS_SCRIPT_URL;
+      form.target = iframe.name;
+      form.enctype = 'application/x-www-form-urlencoded';
+      form.style.display = 'none';
+
+      const payload = {
+        action: 'updateSupplierMapping',
+        mappingId: mapping.id,
+        data: JSON.stringify(rowData),
+      };
+
+      Object.keys(payload).forEach(key => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = payload[key as keyof typeof payload];
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+
+      setTimeout(() => {
+        try {
+          if (document.body.contains(form)) document.body.removeChild(form);
+          if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        } catch (e) {}
+        resolve(true);
+      }, 2000);
+    });
+  } catch (error) {
+    console.error('Error updating supplier mapping in Google Sheets:', error);
+    return false;
+  }
+}
+
+/**
+ * Fetch all supplier mappings from Google Sheets
+ */
+export async function fetchSupplierMappingsFromSheets(): Promise<SupplierNameMapping[]> {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+    return [];
+  }
+
+  try {
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getSupplierMappings`, {
+      method: 'GET',
+    });
+
+    const responseText = await response.text();
+    
+    if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
+      console.error('Google Apps Script requires authorization.');
+      return [];
+    }
+
+    const result = JSON.parse(responseText);
+    
+    if (result.success && result.data) {
+      const mappings = result.data.map((row: any[]) => ({
+        id: String(row[0] || ''),
+        originalName: String(row[1] || ''),
+        correctedName: String(row[2] || ''),
+        confidence: Number(row[3]) || 1,
+        lastUsed: String(row[4] || new Date().toISOString()),
+        createdAt: String(row[5] || new Date().toISOString()),
+      } as SupplierNameMapping));
+
+      return mappings;
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Error fetching supplier mappings from Google Sheets:', error);
+    return [];
   }
 }
 

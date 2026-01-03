@@ -1,16 +1,17 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Transaction } from "../types/transaction";
 import { StorageService } from "../services/storageService";
 import { PartyMappingService } from "../services/partyMappingService";
 import { fetchTransactionsFromSheets, isGoogleSheetsConfigured } from "../services/googleSheetsService";
+import { AuthService } from "../services/authService";
 import { formatDate } from "../lib/utils";
 import { DatePicker } from "../components/ui/DatePicker";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Button } from "../components/ui/Button";
-import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer } from "lucide-react";
+import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer, ArrowRightLeft, LogOut } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Label } from "../components/ui/Label";
 import { Modal } from "../components/ui/Modal";
@@ -19,6 +20,7 @@ type ViewType = "pending" | "completed" | "hold" | "selfTransfer";
 
 export function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [view, setView] = useState<ViewType>("pending");
@@ -75,13 +77,50 @@ export function Transactions() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   // View mode for pending transactions (list or grid)
   const [pendingViewMode, setPendingViewMode] = useState<"list" | "grid">("list");
-  // Sort state for date field
-  const [dateSort, setDateSort] = useState<"asc" | "desc" | null>(null);
+  // Sort state for all columns
+  const [sortColumn, setSortColumn] = useState<"date" | "narration" | "amount" | "party" | "vyaparRef" | null>("date");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  
+  // Helper function to handle column sorting
+  const handleSort = (column: "date" | "narration" | "amount" | "party" | "vyaparRef") => {
+    if (sortColumn === column) {
+      // Toggle direction if same column
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      // Set new column with default descending
+      setSortColumn(column);
+      setSortDirection("desc");
+    }
+  };
+  
+  // Helper function to get sort icon for a column
+  const getSortIcon = (column: "date" | "narration" | "amount" | "party" | "vyaparRef") => {
+    if (sortColumn !== column) {
+      return <ArrowUpDown className="h-4 w-4 text-muted-foreground" />;
+    }
+    return sortDirection === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />;
+  };
   // Modal state for editing transaction
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalPartyName, setModalPartyName] = useState("");
   const [modalVyaparRef, setModalVyaparRef] = useState("");
   const [modalSuggestions, setModalSuggestions] = useState<string[]>([]);
+  const [isSavingToSheets, setIsSavingToSheets] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<{ message: string; existingTransaction?: Transaction; transactionId?: string } | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [inlineErrors, setInlineErrors] = useState<Record<string, { message: string; existingTransaction?: Transaction; transactionId?: string }>>({});
+  const [inlineLoading, setInlineLoading] = useState<Record<string, boolean>>({});
+  // Confirmation modal state
+  const [confirmationModal, setConfirmationModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    icon: React.ReactNode;
+    onConfirm: () => void;
+    confirmText?: string;
+    cancelText?: string;
+    variant?: 'warning' | 'info' | 'danger';
+  } | null>(null);
 
   // Load transactions from Google Sheets (single source of truth - no local storage fallback)
   const loadTransactions = useCallback(async () => {
@@ -275,15 +314,35 @@ export function Transactions() {
       );
     }
 
-    // Apply date sorting if enabled, otherwise default to newest first
-    if (dateSort) {
+    // Apply sorting based on selected column
+    if (sortColumn) {
       filtered = [...filtered].sort((a, b) => {
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
-        return dateSort === "asc" ? dateA - dateB : dateB - dateA;
+        let comparison = 0;
+        
+        switch (sortColumn) {
+          case "date":
+            comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+            break;
+          case "narration":
+            comparison = (a.description || "").localeCompare(b.description || "");
+            break;
+          case "amount":
+            comparison = a.amount - b.amount;
+            break;
+          case "party":
+            comparison = (a.partyName || "").localeCompare(b.partyName || "");
+            break;
+          case "vyaparRef":
+            const refA = (a.vyapar_reference_number || "").toLowerCase();
+            const refB = (b.vyapar_reference_number || "").toLowerCase();
+            comparison = refA.localeCompare(refB);
+            break;
+        }
+        
+        return sortDirection === "asc" ? comparison : -comparison;
       });
     } else {
-      // Default: newest first
+      // Default: newest first by date
       filtered = [...filtered].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }
 
@@ -291,7 +350,7 @@ export function Transactions() {
     // Note: inputValues is accessed via closure but not in dependencies
     // This prevents re-renders while typing, but filter still works correctly
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, searchQuery, view, dateFrom, dateTo, dateSort]);
+  }, [transactions, searchQuery, view, dateFrom, dateTo, sortColumn, sortDirection]);
 
   // Pagination calculations
   const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / itemsPerPage));
@@ -557,49 +616,137 @@ export function Transactions() {
     if (transaction) {
       const finalValue = inputValues[id] ?? transaction.vyapar_reference_number ?? "";
       if (finalValue.trim()) {
-        // Check for duplicate Vyapar reference number
-        const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
-        const duplicateCheck = await checkDuplicateVyaparRef(finalValue.trim(), id);
+        // Clear previous error for this transaction
+        setInlineErrors((prev) => {
+          const newErrors = { ...prev };
+          delete newErrors[id];
+          return newErrors;
+        });
         
-        if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
-          const existing = duplicateCheck.existingTransaction;
-          const existingDate = existing.date || 'N/A';
-          const existingAmount = existing.amount || 0;
-          const existingParty = existing.partyName || 'N/A';
+        // Show loading state
+        setInlineLoading((prev) => ({ ...prev, [id]: true }));
+        
+        try {
+          // Check for duplicate Vyapar reference number
+          const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
+          const duplicateCheck = await checkDuplicateVyaparRef(finalValue.trim(), id);
           
-          alert(
-            `❌ DUPLICATE VYAPAR REFERENCE NUMBER!\n\n` +
-            `This Vyapar reference number "${finalValue.trim()}" already exists:\n\n` +
-            `Transaction ID: ${duplicateCheck.existingTransactionId}\n` +
-            `Date: ${existingDate}\n` +
-            `Amount: ₹${existingAmount.toLocaleString()}\n` +
-            `Party: ${existingParty}\n\n` +
-            `Please use a different Vyapar reference number.`
+          if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
+            const existing = duplicateCheck.existingTransaction;
+            
+            setInlineErrors((prev) => ({
+              ...prev,
+              [id]: {
+                message: `This Vyapar reference number "${finalValue.trim()}" already exists`,
+                existingTransaction: existing,
+                transactionId: duplicateCheck.existingTransactionId
+              }
+            }));
+            setInlineLoading((prev) => {
+              const newLoading = { ...prev };
+              delete newLoading[id];
+              return newLoading;
+            });
+            return; // Prevent submission
+          }
+          
+          // Remove hold status when completing transaction
+          const updates: any = {
+            added_to_vyapar: true,
+            vyapar_reference_number: finalValue.trim(),
+          };
+          
+          // If transaction was on hold, remove hold status
+          if (transaction.hold) {
+            updates.hold = false;
+          }
+          
+          // Ensure checkbox is checked and save to Google Sheets
+          // Update local state first for immediate UI feedback
+          setTransactions((prev) =>
+            prev.map((t) =>
+              t.id === id
+                ? {
+                    ...t,
+                    added_to_vyapar: true,
+                    vyapar_reference_number: finalValue.trim(),
+                    hold: false, // Remove hold when completed
+                    date: t.date, // Explicitly preserve original date
+                  }
+                : t
+            )
           );
-          return; // Prevent submission
+          
+          // Clear local input value
+          setInputValues((prev) => {
+            const newValues = { ...prev };
+            delete newValues[id];
+            return newValues;
+          });
+          
+          // Clear focus tracking
+          focusedInputId.current = null;
+          
+          // Save to Google Sheets (this will show error if it fails)
+          await StorageService.updateTransaction(id, updates, transaction);
+          
+          // Clear loading state
+          setInlineLoading((prev) => {
+            const newLoading = { ...prev };
+            delete newLoading[id];
+            return newLoading;
+          });
+        } catch (error) {
+          console.error('Error saving transaction:', error);
+          setInlineErrors((prev) => ({
+            ...prev,
+            [id]: { message: "Failed to save transaction. Please try again." }
+          }));
+          setInlineLoading((prev) => {
+            const newLoading = { ...prev };
+            delete newLoading[id];
+            return newLoading;
+          });
         }
+      }
+    }
+  };
+
+  // Handle cancel (X icon)
+  const handleCancel = (id: string) => {
+    const transaction = transactions.find((t) => t.id === id);
+    if (!transaction) return;
+    
+    setConfirmationModal({
+      isOpen: true,
+      title: "Cancel Transaction",
+      message: `Are you sure you want to cancel this transaction?\n\n` +
+        `This will:\n` +
+        `• Remove the "Added to Vyapar" status\n` +
+        `• Clear the Vyapar reference number\n` +
+        `• Move the transaction back to pending\n\n` +
+        `The transaction data (date, amount, narration, party name) will remain unchanged.`,
+      icon: <X className="h-8 w-8 text-red-600" />,
+      variant: 'danger',
+      confirmText: "Yes, Cancel Transaction",
+      cancelText: "Keep Transaction",
+      onConfirm: () => {
+        StorageService.updateTransaction(id, {
+          added_to_vyapar: false,
+          vyapar_reference_number: undefined,
+        }, transaction);
         
-        // Remove hold status when completing transaction
-        const updates: any = {
-          added_to_vyapar: true,
-          vyapar_reference_number: finalValue.trim(),
-        };
+        // Clear focus tracking
+        focusedInputId.current = null;
         
-        // If transaction was on hold, remove hold status
-        if (transaction.hold) {
-          updates.hold = false;
-        }
-        
-        // Ensure checkbox is checked and save to Google Sheets
-        // Update local state first for immediate UI feedback
+        // Update local state
         setTransactions((prev) =>
           prev.map((t) =>
             t.id === id
               ? {
                   ...t,
-                  added_to_vyapar: true,
-                  vyapar_reference_number: finalValue.trim(),
-                  hold: false, // Remove hold when completed
+                  added_to_vyapar: false,
+                  vyapar_reference_number: undefined,
                   date: t.date, // Explicitly preserve original date
                 }
               : t
@@ -613,48 +760,8 @@ export function Transactions() {
           return newValues;
         });
         
-        // Clear focus tracking
-        focusedInputId.current = null;
-        
-        // Save to Google Sheets (this will show error if it fails)
-        StorageService.updateTransaction(id, updates, transaction);
-        
-        alert("Transaction moved to completed transactions");
+        setConfirmationModal(null);
       }
-    }
-  };
-
-  // Handle cancel (X icon)
-  const handleCancel = (id: string) => {
-    const transaction = transactions.find((t) => t.id === id);
-    if (!transaction) return;
-    
-    StorageService.updateTransaction(id, {
-      added_to_vyapar: false,
-      vyapar_reference_number: undefined,
-    }, transaction);
-    
-    // Clear focus tracking
-    focusedInputId.current = null;
-    
-    // Update local state
-    setTransactions((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              added_to_vyapar: false,
-              vyapar_reference_number: undefined,
-            }
-          : t
-      )
-    );
-    
-    // Clear local input value
-    setInputValues((prev) => {
-      const newValues = { ...prev };
-      delete newValues[id];
-      return newValues;
     });
   };
 
@@ -942,23 +1049,29 @@ export function Transactions() {
 
   // Handle Hold status
   const handleSetHold = (transactionId: string) => {
-    const confirmed = window.confirm(
-      "Do you want to put this transaction on HOLD?\n\n" +
-      "This will mark the transaction as held. You can hold transactions without entering Vyapar reference number.\n" +
-      "The Vyapar reference number and party name will remain unchanged."
-    );
+    const transaction = transactions.find((t) => t.id === transactionId);
+    if (!transaction) return;
     
-    if (confirmed) {
-      const transaction = transactions.find((t) => t.id === transactionId);
-      if (transaction) {
+    setConfirmationModal({
+      isOpen: true,
+      title: "Put Transaction on Hold",
+      message: `Are you sure you want to put this transaction on HOLD?\n\n` +
+        `This will mark the transaction as held. You can hold transactions without entering Vyapar reference number.\n` +
+        `The Vyapar reference number and party name will remain unchanged.`,
+      icon: <Clock className="h-8 w-8 text-yellow-600" />,
+      variant: 'warning',
+      confirmText: "Yes, Put on Hold",
+      cancelText: "Cancel",
+      onConfirm: () => {
         StorageService.updateTransaction(transactionId, { hold: true }, transaction);
         setTransactions((prev) =>
           prev.map((t) => (t.id === transactionId ? { ...t, hold: true, date: t.date } : t))
         );
         // Switch to hold view
         setView("hold");
+        setConfirmationModal(null);
       }
-    }
+    });
   };
 
   // Handle Unhold
@@ -966,19 +1079,40 @@ export function Transactions() {
     const transaction = transactions.find((t) => t.id === transactionId);
     if (!transaction) return;
     
-    StorageService.updateTransaction(transactionId, { hold: false }, transaction);
-    setTransactions((prev) =>
-      prev.map((t) => (t.id === transactionId ? { ...t, hold: false, date: t.date } : t))
-    );
+    setConfirmationModal({
+      isOpen: true,
+      title: "Remove Hold",
+      message: `Are you sure you want to remove the HOLD status from this transaction?\n\n` +
+        `This will make the transaction available for processing again.`,
+      icon: <XCircle className="h-8 w-8 text-yellow-600" />,
+      variant: 'info',
+      confirmText: "Yes, Remove Hold",
+      cancelText: "Cancel",
+      onConfirm: () => {
+        StorageService.updateTransaction(transactionId, { hold: false }, transaction);
+        setTransactions((prev) =>
+          prev.map((t) => (t.id === transactionId ? { ...t, hold: false, date: t.date } : t))
+        );
+        setConfirmationModal(null);
+      }
+    });
   };
 
   // Handle Set Self Transfer
   const handleSetSelfTransfer = (transactionId: string) => {
-    const confirmed = window.confirm("Move this transaction to Self Transfer?");
+    const transaction = transactions.find((t) => t.id === transactionId);
+    if (!transaction) return;
     
-    if (confirmed) {
-      const transaction = transactions.find((t) => t.id === transactionId);
-      if (transaction) {
+    setConfirmationModal({
+      isOpen: true,
+      title: "Mark as Self Transfer",
+      message: `Are you sure you want to mark this transaction as SELF TRANSFER?\n\n` +
+        `This will move the transaction to the Self Transfer view. Self transfer transactions are internal transfers between your own accounts.`,
+      icon: <ArrowRightLeft className="h-8 w-8 text-purple-600" />,
+      variant: 'info',
+      confirmText: "Yes, Mark as Self Transfer",
+      cancelText: "Cancel",
+      onConfirm: () => {
         // CRITICAL: NEVER UPDATE DATE - preserve original date from CSV upload
         const originalDate = transaction.date;
         console.log('🔒 Preserving original date:', originalDate, 'for transaction:', transactionId);
@@ -1001,8 +1135,9 @@ export function Transactions() {
         );
         // Switch to self transfer view
         setView("selfTransfer");
+        setConfirmationModal(null);
       }
-    }
+    });
   };
 
   // Handle Unset Self Transfer
@@ -1010,10 +1145,23 @@ export function Transactions() {
     const transaction = transactions.find((t) => t.id === transactionId);
     if (!transaction) return;
     
-    StorageService.updateTransaction(transactionId, { selfTransfer: false }, transaction);
-    setTransactions((prev) =>
-      prev.map((t) => (t.id === transactionId ? { ...t, selfTransfer: false, date: t.date } : t))
-    );
+    setConfirmationModal({
+      isOpen: true,
+      title: "Remove Self Transfer",
+      message: `Are you sure you want to remove the SELF TRANSFER status from this transaction?\n\n` +
+        `This will make the transaction available for normal processing again.`,
+      icon: <XCircle className="h-8 w-8 text-purple-600" />,
+      variant: 'info',
+      confirmText: "Yes, Remove Self Transfer",
+      cancelText: "Cancel",
+      onConfirm: () => {
+        StorageService.updateTransaction(transactionId, { selfTransfer: false }, transaction);
+        setTransactions((prev) =>
+          prev.map((t) => (t.id === transactionId ? { ...t, selfTransfer: false, date: t.date } : t))
+        );
+        setConfirmationModal(null);
+      }
+    });
   };
 
   // Handle apply suggestion
@@ -1132,79 +1280,93 @@ export function Transactions() {
     setModalPartyName("");
     setModalVyaparRef("");
     setModalSuggestions([]);
+    setIsSavingToSheets(false);
+    setDuplicateError(null);
+    setSaveSuccess(false);
   };
 
   // Handle submitting transaction from modal (move to completed)
   const handleSubmitTransaction = async () => {
     if (!editingTransaction) return;
     
+    // Clear previous errors and success messages
+    setDuplicateError(null);
+    setSaveSuccess(false);
+    
     const partyName = modalPartyName.trim();
     const vyaparRef = modalVyaparRef.trim();
     
     if (!partyName || !vyaparRef) {
-      alert("Please enter both Party Name and Vyapar Reference Number");
+      setDuplicateError({ message: "Please enter both Party Name and Vyapar Reference Number" });
       return;
     }
     
     // Check for duplicate Vyapar reference number
-    const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
-    const duplicateCheck = await checkDuplicateVyaparRef(vyaparRef, editingTransaction.id);
-    
-    if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
-      const existing = duplicateCheck.existingTransaction;
-      const existingDate = existing.date || 'N/A';
-      const existingAmount = existing.amount || 0;
-      const existingParty = existing.partyName || 'N/A';
+    setIsSavingToSheets(true);
+    try {
+      const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
+      const duplicateCheck = await checkDuplicateVyaparRef(vyaparRef, editingTransaction.id);
       
-      alert(
-        `❌ DUPLICATE VYAPAR REFERENCE NUMBER!\n\n` +
-        `This Vyapar reference number "${vyaparRef}" already exists:\n\n` +
-        `Transaction ID: ${duplicateCheck.existingTransactionId}\n` +
-        `Date: ${existingDate}\n` +
-        `Amount: ₹${existingAmount.toLocaleString()}\n` +
-        `Party: ${existingParty}\n\n` +
-        `Please use a different Vyapar reference number.`
+      if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
+        const existing = duplicateCheck.existingTransaction;
+        const existingDate = existing.date || 'N/A';
+        const existingAmount = existing.amount || 0;
+        const existingParty = existing.partyName || 'N/A';
+        
+        setDuplicateError({
+          message: `This Vyapar reference number "${vyaparRef}" already exists`,
+          existingTransaction: existing,
+          transactionId: duplicateCheck.existingTransactionId
+        });
+        setIsSavingToSheets(false);
+        return; // Prevent submission
+      }
+      
+      // Update transaction with party name and Vyapar ref
+      // NEVER UPDATE DATE - preserve original date
+      const updatedTransaction = {
+        ...editingTransaction,
+        partyName,
+        vyapar_reference_number: vyaparRef,
+        added_to_vyapar: true,
+        hold: false, // Remove hold if it was on hold
+        date: editingTransaction.date, // Explicitly preserve original date
+      };
+      
+      // Update local state first
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === editingTransaction.id ? updatedTransaction : t
+        )
       );
-      return; // Prevent submission
+      
+      // Save to Google Sheets (this will show error if it fails)
+      await StorageService.updateTransaction(editingTransaction.id, {
+        partyName,
+        vyapar_reference_number: vyaparRef,
+        added_to_vyapar: true,
+        hold: false,
+      }, updatedTransaction);
+      
+      // Learn from narration
+      if (editingTransaction.description) {
+        PartyMappingService.autoTrainFromNarration(editingTransaction.description, partyName).catch(err => {
+          console.error('Error training party mapping:', err);
+        });
+      }
+      
+      // Show success message
+      setSaveSuccess(true);
+      
+      // Close modal after a short delay to show success message
+      setTimeout(() => {
+        handleCloseEditModal();
+      }, 1500);
+    } catch (error) {
+      console.error('Error saving transaction:', error);
+      setDuplicateError({ message: "Failed to save transaction. Please try again." });
+      setIsSavingToSheets(false);
     }
-    
-    // Update transaction with party name and Vyapar ref
-    // NEVER UPDATE DATE - preserve original date
-    const updatedTransaction = {
-      ...editingTransaction,
-      partyName,
-      vyapar_reference_number: vyaparRef,
-      added_to_vyapar: true,
-      hold: false, // Remove hold if it was on hold
-      date: editingTransaction.date, // Explicitly preserve original date
-    };
-    
-    // Update local state first
-    setTransactions((prev) =>
-      prev.map((t) =>
-        t.id === editingTransaction.id ? updatedTransaction : t
-      )
-    );
-    
-    // Close modal
-    handleCloseEditModal();
-    
-    // Save to Google Sheets (this will show error if it fails)
-    StorageService.updateTransaction(editingTransaction.id, {
-      partyName,
-      vyapar_reference_number: vyaparRef,
-      added_to_vyapar: true,
-      hold: false,
-    }, updatedTransaction);
-    
-    // Learn from narration
-    if (editingTransaction.description) {
-      PartyMappingService.autoTrainFromNarration(editingTransaction.description, partyName).catch(err => {
-        console.error('Error training party mapping:', err);
-      });
-    }
-    
-    alert("Transaction moved to completed!");
   };
 
   // Handle moving transaction to hold from modal
@@ -1445,17 +1607,42 @@ export function Transactions() {
             )}
           </p>
         </div>
-        {isGoogleSheetsConfigured() && (
+        <div className="flex items-center gap-2">
+          {isGoogleSheetsConfigured() && (
+            <Button
+              variant="outline"
+              onClick={loadTransactions}
+              disabled={isLoading}
+              className="flex items-center gap-2 border-slate-300 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 shadow-sm"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              {isLoading ? 'Loading...' : 'Refresh'}
+            </Button>
+          )}
           <Button
             variant="outline"
-            onClick={loadTransactions}
-            disabled={isLoading}
-            className="flex items-center gap-2 border-slate-300 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 shadow-sm"
+            onClick={() => {
+              setConfirmationModal({
+                isOpen: true,
+                title: "Logout",
+                message: `Are you sure you want to logout?\n\n` +
+                  `You will be redirected to the login page.`,
+                icon: <LogOut className="h-8 w-8 text-red-600" />,
+                variant: 'danger',
+                confirmText: "Yes, Logout",
+                cancelText: "Cancel",
+                onConfirm: () => {
+                  AuthService.logout();
+                  navigate("/login", { replace: true });
+                }
+              });
+            }}
+            className="flex items-center gap-2 border-slate-300 hover:bg-red-50 hover:border-red-400 hover:text-red-700 shadow-sm"
+            title="Logout"
           >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            {isLoading ? 'Loading...' : 'Refresh'}
+            <LogOut className="h-4 w-4" />
           </Button>
-        )}
+        </div>
       </div>
 
       {/* Tabs - Minimal & Clean */}
@@ -1565,9 +1752,12 @@ export function Transactions() {
                 <div className="flex gap-1.5">
                   <Button
                     type="button"
-                    variant={dateSort === "desc" ? "default" : "outline"}
+                    variant={sortColumn === "date" && sortDirection === "desc" ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setDateSort(dateSort === "desc" ? null : "desc")}
+                    onClick={() => {
+                      setSortColumn("date");
+                      setSortDirection("desc");
+                    }}
                     className="flex-1 h-8 text-xs"
                   >
                     <ArrowDown className="h-3 w-3 mr-1" />
@@ -1575,9 +1765,12 @@ export function Transactions() {
                   </Button>
                   <Button
                     type="button"
-                    variant={dateSort === "asc" ? "default" : "outline"}
+                    variant={sortColumn === "date" && sortDirection === "asc" ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setDateSort(dateSort === "asc" ? null : "asc")}
+                    onClick={() => {
+                      setSortColumn("date");
+                      setSortDirection("asc");
+                    }}
                     className="flex-1 h-8 text-xs"
                   >
                     <ArrowUp className="h-3 w-3 mr-1" />
@@ -1650,7 +1843,8 @@ export function Transactions() {
                       setDateFromSelfTransfer("");
                       setDateToSelfTransfer("");
                     }
-                    setDateSort(null);
+                    setSortColumn("date");
+                    setSortDirection("desc");
                   }}
                   className="h-9"
                 >
@@ -1716,9 +1910,12 @@ export function Transactions() {
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"
-                    variant={dateSort === "asc" ? "default" : "outline"}
+                    variant={sortColumn === "date" && sortDirection === "asc" ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setDateSort(dateSort === "asc" ? null : "asc")}
+                    onClick={() => {
+                      setSortColumn("date");
+                      setSortDirection("asc");
+                    }}
                     className="flex-1"
                   >
                     <ArrowUp className="h-4 w-4 mr-1" />
@@ -1726,9 +1923,12 @@ export function Transactions() {
                   </Button>
                   <Button
                     type="button"
-                    variant={dateSort === "desc" ? "default" : "outline"}
+                    variant={sortColumn === "date" && sortDirection === "desc" ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setDateSort(dateSort === "desc" ? null : "desc")}
+                    onClick={() => {
+                      setSortColumn("date");
+                      setSortDirection("desc");
+                    }}
                     className="flex-1"
                   >
                     <ArrowDown className="h-4 w-4 mr-1" />
@@ -1750,7 +1950,7 @@ export function Transactions() {
                     setDateFromSelfTransfer("");
                     setDateToSelfTransfer("");
                   }
-                  setDateSort(null);
+                  setSortColumn(null);
                 }}
               >
                   Clear All
@@ -1794,10 +1994,46 @@ export function Transactions() {
                     <table className="w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
-                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Date</th>
-                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Narration</th>
+                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
+                            <div className="flex items-center gap-2">
+                              <span>Date</span>
+                              <button
+                                type="button"
+                                onClick={() => handleSort("date")}
+                                className="p-1 hover:bg-accent rounded"
+                                title="Sort by date"
+                              >
+                                {getSortIcon("date")}
+                              </button>
+                            </div>
+                          </th>
+                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
+                            <div className="flex items-center gap-2">
+                              <span>Narration</span>
+                              <button
+                                type="button"
+                                onClick={() => handleSort("narration")}
+                                className="p-1 hover:bg-accent rounded"
+                                title="Sort by narration"
+                              >
+                                {getSortIcon("narration")}
+                              </button>
+                            </div>
+                          </th>
                           <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Bank Ref No.</th>
-                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Amount</th>
+                          <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
+                            <div className="flex items-center gap-2">
+                              <span>Amount</span>
+                              <button
+                                type="button"
+                                onClick={() => handleSort("amount")}
+                                className="p-1 hover:bg-accent rounded"
+                                title="Sort by amount"
+                              >
+                                {getSortIcon("amount")}
+                              </button>
+                            </div>
+                          </th>
                           <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Action</th>
                         </tr>
                       </thead>
@@ -1921,40 +2157,75 @@ export function Transactions() {
             <table className="w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
-                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Added to Vyapar</th>
                     <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
                       <div className="flex items-center gap-2">
                         <span>Date</span>
                         <button
                           type="button"
-                          onClick={() => {
-                            if (dateSort === "asc") {
-                              setDateSort("desc");
-                            } else if (dateSort === "desc") {
-                              setDateSort(null);
-                            } else {
-                              setDateSort("asc");
-                            }
-                          }}
+                          onClick={() => handleSort("date")}
                           className="p-1 hover:bg-accent rounded"
                           title="Sort by date"
                         >
-                          {dateSort === "asc" ? (
-                            <ArrowUp className="h-4 w-4" />
-                          ) : dateSort === "desc" ? (
-                            <ArrowDown className="h-4 w-4" />
-                          ) : (
-                            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
-                          )}
+                          {getSortIcon("date")}
                         </button>
                       </div>
                     </th>
-                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Narration</th>
+                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">
+                    <div className="flex items-center gap-2">
+                      <span>Narration</span>
+                      <button
+                        type="button"
+                        onClick={() => handleSort("narration")}
+                        className="p-1 hover:bg-accent rounded"
+                        title="Sort by narration"
+                      >
+                        {getSortIcon("narration")}
+                      </button>
+                    </div>
+                  </th>
                   <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Bank Ref No.</th>
-                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Amount</th>
-                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Party</th>
+                  {view !== "selfTransfer" && (
+                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">
+                      <div className="flex items-center gap-2">
+                        <span>Party</span>
+                        <button
+                          type="button"
+                          onClick={() => handleSort("party")}
+                          className="p-1 hover:bg-accent rounded"
+                          title="Sort by party"
+                        >
+                          {getSortIcon("party")}
+                        </button>
+                      </div>
+                    </th>
+                  )}
+                  <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">
+                    <div className="flex items-center gap-2">
+                      <span>Amount</span>
+                      <button
+                        type="button"
+                        onClick={() => handleSort("amount")}
+                        className="p-1 hover:bg-accent rounded"
+                        title="Sort by amount"
+                      >
+                        {getSortIcon("amount")}
+                      </button>
+                    </div>
+                  </th>
                   {(view !== "hold" && view !== "selfTransfer") && (
-                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Vyapar Ref No.</th>
+                    <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">
+                      <div className="flex items-center gap-2">
+                        <span>Vyapar Ref No.</span>
+                        <button
+                          type="button"
+                          onClick={() => handleSort("vyaparRef")}
+                          className="p-1 hover:bg-accent rounded"
+                          title="Sort by Vyapar reference"
+                        >
+                          {getSortIcon("vyaparRef")}
+                        </button>
+                      </div>
+                    </th>
                   )}
                     <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Actions</th>
                 </tr>
@@ -1962,7 +2233,7 @@ export function Transactions() {
               <tbody>
                 {filteredTransactions.length === 0 ? (
                   <tr>
-                      <td colSpan={view === "hold" || view === "selfTransfer" ? 7 : 8} className="p-8 text-center text-muted-foreground border-b border-slate-300">
+                      <td colSpan={view === "selfTransfer" ? 5 : view === "hold" ? 6 : 7} className="p-8 text-center text-muted-foreground border-b border-slate-300">
                       No transactions found
                     </td>
                   </tr>
@@ -1985,25 +2256,15 @@ export function Transactions() {
                           !transaction.hold && !transaction.selfTransfer && isAdded && "bg-green-50"
                         )}
                       >
-                        <td className="p-3 border-r border-slate-300">
-                          <Checkbox
-                            checked={isAdded}
-                            onChange={(e) => handleToggleVyapar(transaction.id, e.target.checked)}
-                            disabled={transaction.hold === true || transaction.selfTransfer === true}
-                            title={transaction.hold ? "Cannot modify - transaction is on hold" : transaction.selfTransfer ? "Cannot modify - transaction is a self transfer" : ""}
-                          />
-                        </td>
                         <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap">{formatDate(transaction.date)}</td>
                         <td className="p-3 text-sm border-r border-slate-300">{transaction.description}</td>
                         <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
                           {transaction.referenceNumber || "-"}
                         </td>
-                        <td className="p-3 text-sm font-semibold text-green-600 border-r border-slate-300">
-                          ₹{transaction.amount.toLocaleString()}
-                        </td>
-                        <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
-                          <div className="flex items-center gap-2">
-                            {(() => {
+                        {view !== "selfTransfer" && (
+                          <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
+                            <div className="flex items-center gap-2">
+                              {(() => {
                               // Check if transaction is completed
                               const isAdded = transaction.added_to_vyapar || transaction.inVyapar;
                               const hasRef = Boolean(
@@ -2141,6 +2402,10 @@ export function Transactions() {
                             })()}
                           </div>
                         </td>
+                        )}
+                        <td className="p-3 text-sm font-semibold text-green-600 border-r border-slate-300">
+                          ₹{transaction.amount.toLocaleString()}
+                        </td>
                         {(view !== "hold" && view !== "selfTransfer") && (
                           <td className="p-3 border-r border-slate-300">
                             <div className="flex items-center gap-2">
@@ -2153,7 +2418,7 @@ export function Transactions() {
                                 // Self transfer transactions should always allow editing Vyapar ref
                                 if (isCompleted && !transaction.selfTransfer) {
                                   return (
-                                    <span className="text-sm text-muted-foreground">
+                                    <span className="text-sm font-semibold text-blue-600">
                                       {transaction.vyapar_reference_number || "-"}
                                     </span>
                                   );
@@ -2170,6 +2435,14 @@ export function Transactions() {
                                     // Don't prevent default - we need the input to work normally
                                     const value = e.target.value;
                                     handleReferenceChange(transaction.id, value);
+                                    // Clear error when user types
+                                    if (inlineErrors[transaction.id]) {
+                                      setInlineErrors((prev) => {
+                                        const newErrors = { ...prev };
+                                        delete newErrors[transaction.id];
+                                        return newErrors;
+                                      });
+                                    }
                               }}
                               onFocus={(e) => {
                                 e.stopPropagation();
@@ -2248,56 +2521,84 @@ export function Transactions() {
                                     }, 300);
                                   }}
                                   placeholder="Enter Vyapar ref no."
-                                  className="w-full max-w-xs border-2 border-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                  className={cn(
+                                    "w-full max-w-xs border-2 border-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20",
+                                    inlineErrors[transaction.id] && "border-red-500 focus:border-red-500"
+                                  )}
                                   id={`input-${transaction.id}`}
+                                  disabled={inlineLoading[transaction.id]}
                                 />
                               );
                             })()}
-                            {showIcons && (
-                              <>
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleConfirm(transaction.id);
-                                  }}
-                                  className="flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer p-1"
-                                  title="Confirm and move to Completed"
-                                >
-                                  <CheckCircle2 className="h-5 w-5 text-green-600" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleCancel(transaction.id);
-                                  }}
-                                  className="flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer p-1"
-                                  title="Cancel and deselect"
-                                >
-                                  <X className="h-5 w-5 text-red-600" />
-                                </button>
-                              </>
+                            {/* Inline Error Message */}
+                            {inlineErrors[transaction.id] && (
+                              <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs">
+                                <div className="flex items-start gap-2">
+                                  <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
+                                  <div className="flex-1">
+                                    <p className="font-semibold text-red-900 mb-1">{inlineErrors[transaction.id].message}</p>
+                                    {inlineErrors[transaction.id].existingTransaction && (
+                                      <div className="mt-2 p-2 bg-white rounded border border-red-200">
+                                        <p className="font-medium text-red-800 mb-1">Existing Transaction:</p>
+                                        <div className="space-y-0.5 text-red-700">
+                                          <p><span className="font-medium">ID:</span> {inlineErrors[transaction.id].transactionId || 'N/A'}</p>
+                                          <p><span className="font-medium">Date:</span> {formatDate(inlineErrors[transaction.id].existingTransaction?.date || 'N/A')}</p>
+                                          <p><span className="font-medium">Amount:</span> ₹{inlineErrors[transaction.id].existingTransaction?.amount?.toLocaleString() || '0'}</p>
+                                          <p><span className="font-medium">Party:</span> {inlineErrors[transaction.id].existingTransaction?.partyName || 'N/A'}</p>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            {/* Inline Loading State */}
+                            {inlineLoading[transaction.id] && (
+                              <div className="mt-2 flex items-center gap-2 text-xs text-blue-600">
+                                <RefreshCw className="h-4 w-4 animate-spin" />
+                                <span>Saving to Google Sheets...</span>
+                              </div>
                             )}
                           </div>
                         </td>
                         )}
                         <td className="p-3">
                           <div className="flex items-center gap-2">
+                            {/* Cancel button for completed transactions - moves back to pending */}
+                            {(() => {
+                              const hasPartyName = Boolean(transaction.partyName && transaction.partyName.trim() !== '');
+                              const isCompleted = isAdded && hasReference && hasPartyName;
+                              
+                              // Show cancel button only for completed transactions
+                              if (isCompleted && view === "completed") {
+                                return (
+                                  <button
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      handleCancel(transaction.id);
+                                    }}
+                                    className="flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer p-1.5 hover:bg-red-50 rounded border border-red-200"
+                                    title="Cancel transaction and move back to pending"
+                                  >
+                                    <X className="h-5 w-5 text-red-600" />
+                                  </button>
+                                );
+                              }
+                              return null;
+                            })()}
                             {transaction.hold ? (
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleUnhold(transaction.id)}
-                                className="text-xs bg-yellow-50 hover:bg-yellow-100"
+                                className="p-2 bg-yellow-50 hover:bg-yellow-100"
+                                title="Unhold"
                               >
-                                <XCircle className="h-3.5 w-3.5 mr-1.5" />
-                                Unhold
+                                <XCircle className="h-4 w-4 text-yellow-700" />
                               </Button>
                             ) : (
                               <Button
@@ -2305,10 +2606,10 @@ export function Transactions() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleSetHold(transaction.id)}
-                                className="text-xs bg-yellow-50 hover:bg-yellow-100"
+                                className="p-2 bg-yellow-50 hover:bg-yellow-100"
+                                title="Hold"
                               >
-                                <Clock className="h-3.5 w-3.5 mr-1.5" />
-                                Hold
+                                <Clock className="h-4 w-4 text-yellow-700" />
                               </Button>
                             )}
                             {transaction.selfTransfer ? (
@@ -2317,10 +2618,10 @@ export function Transactions() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleUnsetSelfTransfer(transaction.id)}
-                                className="text-xs bg-purple-50 hover:bg-purple-100"
+                                className="p-2 bg-purple-50 hover:bg-purple-100"
+                                title="Remove Self Transfer"
                               >
-                                <XCircle className="h-3.5 w-3.5 mr-1.5" />
-                                Remove Self Transfer
+                                <XCircle className="h-4 w-4 text-purple-700" />
                               </Button>
                             ) : (
                               <Button
@@ -2328,9 +2629,10 @@ export function Transactions() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleSetSelfTransfer(transaction.id)}
-                                className="text-xs bg-purple-50 hover:bg-purple-100"
+                                className="p-2 bg-purple-50 hover:bg-purple-100"
+                                title="Self Transfer"
                               >
-                                Self Transfer
+                                <ArrowRightLeft className="h-4 w-4 text-purple-700" />
                               </Button>
                             )}
                           </div>
@@ -2502,11 +2804,63 @@ export function Transactions() {
               <Input
                 id="modal-vyapar-ref"
                 value={modalVyaparRef}
-                onChange={(e) => setModalVyaparRef(e.target.value)}
+                onChange={(e) => {
+                  setModalVyaparRef(e.target.value);
+                  // Clear error when user types
+                  if (duplicateError) setDuplicateError(null);
+                }}
                 placeholder="Enter Vyapar reference number"
-                className="h-12 input-modern"
+                className={cn("h-12 input-modern", duplicateError && "border-red-500 focus:border-red-500")}
+                disabled={isSavingToSheets}
               />
             </div>
+
+            {/* Loading State */}
+            {isSavingToSheets && (
+              <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <RefreshCw className="h-5 w-5 text-blue-600 animate-spin" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-blue-900">Saving to Google Sheets...</p>
+                  <p className="text-xs text-blue-700 mt-1">Please wait while we save your transaction</p>
+                </div>
+              </div>
+            )}
+
+            {/* Duplicate Error Message */}
+            {duplicateError && !isSavingToSheets && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-red-900 mb-2">Duplicate Vyapar Reference Number</p>
+                    <p className="text-sm text-red-800 mb-3">{duplicateError.message}</p>
+                    {duplicateError.existingTransaction && (
+                      <div className="mt-3 p-3 bg-white rounded-md border border-red-200">
+                        <p className="text-xs font-semibold text-red-900 mb-2">Existing Transaction Details:</p>
+                        <div className="space-y-1 text-xs text-red-800">
+                          <p><span className="font-medium">Transaction ID:</span> {duplicateError.transactionId || 'N/A'}</p>
+                          <p><span className="font-medium">Date:</span> {formatDate(duplicateError.existingTransaction.date || 'N/A')}</p>
+                          <p><span className="font-medium">Amount:</span> ₹{duplicateError.existingTransaction.amount?.toLocaleString() || '0'}</p>
+                          <p><span className="font-medium">Party:</span> {duplicateError.existingTransaction.partyName || 'N/A'}</p>
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-xs text-red-700 mt-3">Please use a different Vyapar reference number.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Success Message */}
+            {saveSuccess && (
+              <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-green-900">Transaction saved successfully!</p>
+                  <p className="text-xs text-green-700 mt-1">Moving to completed transactions...</p>
+                </div>
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div className="flex justify-between gap-3 pt-6 border-t border-border">
@@ -2534,14 +2888,76 @@ export function Transactions() {
                 <Button 
                   onClick={handleSubmitTransaction}
                   className="btn-gradient"
+                  disabled={isSavingToSheets}
                 >
-                  Submit & Move to Completed
+                  {isSavingToSheets ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Submit & Move to Completed"
+                  )}
                 </Button>
               </div>
             </div>
           </div>
         )}
       </Modal>
+
+      {/* Confirmation Modal */}
+      {confirmationModal && (
+        <Modal
+          isOpen={confirmationModal.isOpen}
+          onClose={() => setConfirmationModal(null)}
+          title=""
+        >
+          <div className="space-y-6">
+            {/* Icon and Title */}
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className={cn(
+                "p-4 rounded-full",
+                confirmationModal.variant === 'warning' && "bg-yellow-100",
+                confirmationModal.variant === 'info' && "bg-blue-100",
+                confirmationModal.variant === 'danger' && "bg-red-100"
+              )}>
+                {confirmationModal.icon}
+              </div>
+              <h3 className="text-2xl font-bold text-foreground">
+                {confirmationModal.title}
+              </h3>
+            </div>
+
+            {/* Message */}
+            <div className="text-center">
+              <p className="text-muted-foreground whitespace-pre-line leading-relaxed">
+                {confirmationModal.message}
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmationModal(null)}
+              >
+                {confirmationModal.cancelText || "Cancel"}
+              </Button>
+              <Button
+                onClick={confirmationModal.onConfirm}
+                className={cn(
+                  confirmationModal.variant === 'warning' && "bg-yellow-600 hover:bg-yellow-700",
+                  confirmationModal.variant === 'info' && "bg-blue-600 hover:bg-blue-700",
+                  confirmationModal.variant === 'danger' && "bg-red-600 hover:bg-red-700",
+                  !confirmationModal.variant && "btn-gradient"
+                )}
+              >
+                {confirmationModal.confirmText || "Confirm"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

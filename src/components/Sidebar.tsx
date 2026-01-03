@@ -1,8 +1,10 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Home, Plus, Upload, List, CheckSquare, Users, Menu, X, Sparkles, LogOut } from "lucide-react";
+import { Home, Plus, Upload, List, Users, Menu, X, Sparkles, LogOut, ChevronDown, ChevronRight, Settings } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../lib/utils";
 import { AuthService } from "../services/authService";
+import { Modal } from "./ui/Modal";
+import { Button } from "./ui/Button";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
@@ -10,20 +12,51 @@ const navigation = [
   { name: "CSV Upload", href: "/csv-upload", icon: Upload },
   { name: "Credit Transactions", href: "/transactions", icon: List },
   { name: "Debit Transactions", href: "/debit-transactions", icon: List },
-  { name: "Reconciliation", href: "/reconciliation", icon: CheckSquare },
-  { name: "Parties", href: "/parties", icon: Users },
-  { name: "Suppliers", href: "/suppliers", icon: Users },
-  { name: "Party Mappings", href: "/party-mappings", icon: Sparkles },
 ];
+
+const utilityMenu = {
+  name: "Utility",
+  icon: Settings,
+  items: [
+    { name: "Parties", href: "/parties", icon: Users },
+    { name: "Suppliers", href: "/suppliers", icon: Users },
+    { name: "Party Mappings", href: "/party-mappings", icon: Sparkles },
+    { name: "Supplier Mappings", href: "/supplier-mappings", icon: Sparkles },
+  ],
+};
 
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [utilityMenuOpen, setUtilityMenuOpen] = useState(false);
+  // Confirmation modal state
+  const [confirmationModal, setConfirmationModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    icon: React.ReactNode;
+    onConfirm: () => void;
+    confirmText?: string;
+    cancelText?: string;
+    variant?: 'warning' | 'info' | 'danger';
+  } | null>(null);
 
   const handleLogout = () => {
-    AuthService.logout();
-    navigate("/login", { replace: true });
+    setConfirmationModal({
+      isOpen: true,
+      title: "Logout",
+      message: `Are you sure you want to logout?\n\n` +
+        `You will be redirected to the login page.`,
+      icon: <LogOut className="h-8 w-8 text-red-600" />,
+      variant: 'danger',
+      confirmText: "Yes, Logout",
+      cancelText: "Cancel",
+      onConfirm: () => {
+        AuthService.logout();
+        navigate("/login", { replace: true });
+      }
+    });
   };
 
   return (
@@ -79,6 +112,51 @@ export function Sidebar() {
                 </Link>
               );
             })}
+            
+            {/* Utility Menu */}
+            <div className="mt-2">
+              <button
+                onClick={() => setUtilityMenuOpen(!utilityMenuOpen)}
+                className={cn(
+                  "w-full flex items-center justify-between gap-3 px-4 py-3 rounded-md transition-all duration-200 group",
+                  "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <utilityMenu.icon className="h-5 w-5" />
+                  <span className="font-medium">{utilityMenu.name}</span>
+                </div>
+                {utilityMenuOpen ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+              </button>
+              
+              {utilityMenuOpen && (
+                <div className="ml-4 mt-1 space-y-1 border-l-2 border-sidebar-border pl-2">
+                  {utilityMenu.items.map((item) => {
+                    const isActive = location.pathname === item.href;
+                    return (
+                      <Link
+                        key={item.name}
+                        to={item.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={cn(
+                          "flex items-center gap-3 px-4 py-2 rounded-md transition-all duration-200 group",
+                          isActive
+                            ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                            : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                        )}
+                      >
+                        <item.icon className="h-4 w-4" />
+                        <span className="text-sm font-medium">{item.name}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </nav>
 
           {/* Logout button */}
@@ -93,6 +171,60 @@ export function Sidebar() {
           </div>
         </div>
       </aside>
+
+      {/* Confirmation Modal */}
+      {confirmationModal && (
+        <Modal
+          isOpen={confirmationModal.isOpen}
+          onClose={() => setConfirmationModal(null)}
+          title=""
+        >
+          <div className="space-y-6">
+            {/* Icon and Title */}
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className={cn(
+                "p-4 rounded-full",
+                confirmationModal.variant === 'warning' && "bg-yellow-100",
+                confirmationModal.variant === 'info' && "bg-blue-100",
+                confirmationModal.variant === 'danger' && "bg-red-100"
+              )}>
+                {confirmationModal.icon}
+              </div>
+              <h3 className="text-2xl font-bold text-foreground">
+                {confirmationModal.title}
+              </h3>
+            </div>
+
+            {/* Message */}
+            <div className="text-center">
+              <p className="text-muted-foreground whitespace-pre-line leading-relaxed">
+                {confirmationModal.message}
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmationModal(null)}
+              >
+                {confirmationModal.cancelText || "Cancel"}
+              </Button>
+              <Button
+                onClick={confirmationModal.onConfirm}
+                className={cn(
+                  confirmationModal.variant === 'warning' && "bg-yellow-600 hover:bg-yellow-700",
+                  confirmationModal.variant === 'info' && "bg-blue-600 hover:bg-blue-700",
+                  confirmationModal.variant === 'danger' && "bg-red-600 hover:bg-red-700",
+                  !confirmationModal.variant && "btn-gradient"
+                )}
+              >
+                {confirmationModal.confirmText || "Confirm"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

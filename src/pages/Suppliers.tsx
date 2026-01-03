@@ -2,13 +2,27 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { SuppliersListService, SupplierSummary } from "../services/suppliersListService";
 import { formatCurrency } from "../lib/utils";
+import { AuthService } from "../services/authService";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { Button } from "../components/ui/Button";
-import { Search, RefreshCw, Eye } from "lucide-react";
+import { Search, RefreshCw, Eye, LogOut } from "lucide-react";
+import { Modal } from "../components/ui/Modal";
+import { cn } from "../lib/utils";
 
 export function Suppliers() {
   const navigate = useNavigate();
+  // Confirmation modal state
+  const [confirmationModal, setConfirmationModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    icon: React.ReactNode;
+    onConfirm: () => void;
+    confirmText?: string;
+    cancelText?: string;
+    variant?: 'warning' | 'info' | 'danger';
+  } | null>(null);
   const [suppliers, setSuppliers] = useState<SupplierSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -68,15 +82,40 @@ export function Suppliers() {
             View suppliers with total amounts from completed debit transactions only
           </p>
         </div>
-        <Button
-          onClick={handleRefresh}
-          disabled={isRefreshing || isLoading}
-          variant="outline"
-          className="flex items-center gap-2"
-        >
-          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          {isRefreshing ? 'Refreshing...' : 'Refresh'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={handleRefresh}
+            disabled={isRefreshing || isLoading}
+            variant="outline"
+            className="flex items-center gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setConfirmationModal({
+                isOpen: true,
+                title: "Logout",
+                message: `Are you sure you want to logout?\n\n` +
+                  `You will be redirected to the login page.`,
+                icon: <LogOut className="h-8 w-8 text-red-600" />,
+                variant: 'danger',
+                confirmText: "Yes, Logout",
+                cancelText: "Cancel",
+                onConfirm: () => {
+                  AuthService.logout();
+                  navigate("/login", { replace: true });
+                }
+              });
+            }}
+            className="flex items-center gap-2 border-slate-300 hover:bg-red-50 hover:border-red-400 hover:text-red-700 shadow-sm"
+            title="Logout"
+          >
+            <LogOut className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -156,6 +195,60 @@ export function Suppliers() {
             </Card>
           ))}
         </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmationModal && (
+        <Modal
+          isOpen={confirmationModal.isOpen}
+          onClose={() => setConfirmationModal(null)}
+          title=""
+        >
+          <div className="space-y-6">
+            {/* Icon and Title */}
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className={cn(
+                "p-4 rounded-full",
+                confirmationModal.variant === 'warning' && "bg-yellow-100",
+                confirmationModal.variant === 'info' && "bg-blue-100",
+                confirmationModal.variant === 'danger' && "bg-red-100"
+              )}>
+                {confirmationModal.icon}
+              </div>
+              <h3 className="text-2xl font-bold text-foreground">
+                {confirmationModal.title}
+              </h3>
+            </div>
+
+            {/* Message */}
+            <div className="text-center">
+              <p className="text-muted-foreground whitespace-pre-line leading-relaxed">
+                {confirmationModal.message}
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmationModal(null)}
+              >
+                {confirmationModal.cancelText || "Cancel"}
+              </Button>
+              <Button
+                onClick={confirmationModal.onConfirm}
+                className={cn(
+                  confirmationModal.variant === 'warning' && "bg-yellow-600 hover:bg-yellow-700",
+                  confirmationModal.variant === 'info' && "bg-blue-600 hover:bg-blue-700",
+                  confirmationModal.variant === 'danger' && "bg-red-600 hover:bg-red-700",
+                  !confirmationModal.variant && "btn-gradient"
+                )}
+              >
+                {confirmationModal.confirmText || "Confirm"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
