@@ -1,4 +1,5 @@
 import { ReactNode, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "./Button";
@@ -14,20 +15,55 @@ interface ModalProps {
 export function Modal({ isOpen, onClose, title, children, className }: ModalProps) {
   useEffect(() => {
     if (isOpen) {
+      // Prevent body scroll
       document.body.style.overflow = "hidden";
+      
+      // Remove any margins/padding that might cause gaps
+      const html = document.documentElement;
+      const body = document.body;
+      const originalHtmlMargin = html.style.margin;
+      const originalBodyMargin = body.style.margin;
+      const originalHtmlPadding = html.style.padding;
+      const originalBodyPadding = body.style.padding;
+      const originalHtmlOverflow = html.style.overflow;
+      
+      html.style.margin = "0";
+      html.style.padding = "0";
+      html.style.overflow = "hidden";
+      body.style.margin = "0";
+      body.style.padding = "0";
+      
+      return () => {
+        document.body.style.overflow = "";
+        html.style.margin = originalHtmlMargin;
+        html.style.padding = originalHtmlPadding;
+        html.style.overflow = originalHtmlOverflow;
+        body.style.margin = originalBodyMargin;
+        body.style.padding = originalBodyPadding;
+      };
     } else {
       document.body.style.overflow = "";
     }
-    return () => {
-      document.body.style.overflow = "";
-    };
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black animate-fade-in"
+      className="fixed flex items-center justify-center backdrop-blur-md animate-fade-in"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100vh',
+        margin: 0,
+        padding: 0,
+        zIndex: 9999,
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+      }}
       onClick={onClose}
     >
       <div
@@ -51,5 +87,7 @@ export function Modal({ isOpen, onClose, title, children, className }: ModalProp
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 }
 

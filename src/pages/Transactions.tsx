@@ -1633,7 +1633,7 @@ export function Transactions() {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Pending Transactions Report</title>
+          <title>${view.charAt(0).toUpperCase() + view.slice(1)} Transactions Report</title>
           <style>
             @media print {
               @page {
@@ -1687,16 +1687,16 @@ export function Transactions() {
               white-space: nowrap;
             }
             .narration-col {
-              width: 45%;
-            }
-            .party-col {
-              width: 25%;
-              min-height: 30px;
+              width: 40%;
             }
             .amount-col {
               width: 18%;
               text-align: right;
               white-space: nowrap;
+            }
+            .party-col {
+              width: 30%;
+              min-height: 30px;
             }
             tr:nth-child(even) {
               background-color: #f9f9f9;
@@ -1705,7 +1705,7 @@ export function Transactions() {
         </head>
         <body>
           <div class="header">
-            <h1>Pending Transactions Report</h1>
+            <h1>${view.charAt(0).toUpperCase() + view.slice(1)} Transactions Report</h1>
             <div class="subtitle">Generated on ${new Date().toLocaleString('en-IN', { dateStyle: 'long', timeStyle: 'short' })}</div>
           </div>
 
@@ -1714,8 +1714,8 @@ export function Transactions() {
               <tr>
                 <th class="date-col">Date</th>
                 <th class="narration-col">Narration</th>
-                <th class="party-col">Party Name</th>
                 <th class="amount-col">Amount</th>
+                ${view !== 'selfTransfer' ? '<th class="party-col">Party Name</th>' : ''}
               </tr>
             </thead>
             <tbody>
@@ -1724,8 +1724,8 @@ export function Transactions() {
                   <tr>
                     <td class="date-col">${formatDate(t.date)}</td>
                     <td class="narration-col">${t.description || ''}</td>
-                    <td class="party-col">&nbsp;</td>
                     <td class="amount-col">₹${t.amount.toLocaleString('en-IN')}</td>
+                    ${view !== 'selfTransfer' ? `<td class="party-col">${t.partyName || '&nbsp;'}</td>` : ''}
                   </tr>
                 `;
               }).join('')}
@@ -2199,7 +2199,7 @@ export function Transactions() {
                           </th>
                           <th 
                             className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
-                            style={{ width: getColumnWidth('narration', 400) }}
+                            style={{ width: getColumnWidth('narration', 500) }}
                           >
                             <div className="flex items-center gap-2">
                               <span>Narration</span>
@@ -2217,7 +2217,7 @@ export function Transactions() {
                               onMouseDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleResizeStart(e, 'narration', getColumnWidth('narration', 400));
+                                handleResizeStart(e, 'narration', getColumnWidth('narration', 500));
                               }}
                             />
                           </th>
@@ -2259,7 +2259,7 @@ export function Transactions() {
                               }}
                             />
                           </th>
-                          <th className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300">Action</th>
+                          <th className="p-2 sm:p-3 text-left text-xs sm:text-sm font-bold text-muted-foreground border-b-2 border-slate-300" style={{ width: '80px' }}>Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2559,7 +2559,7 @@ export function Transactions() {
                       />
                     </th>
                   )}
-                    <th className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300">Actions</th>
+                    <th className="p-2 sm:p-3 text-left text-xs sm:text-sm font-bold text-muted-foreground border-b-2 border-slate-300" style={{ width: '100px' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -2914,7 +2914,7 @@ export function Transactions() {
                           </div>
                         </td>
                         )}
-                        <td className="p-3">
+                        <td className="p-2 sm:p-3" style={{ width: '100px' }}>
                           <div className="flex items-center gap-2">
                             {/* Cancel button for completed transactions - moves back to pending */}
                             {(() => {
