@@ -152,8 +152,8 @@ export function CSVUpload() {
         setParsedTransactions(transactions);
       }
     } catch (err) {
-      console.error("CSV parsing error:", err);
-      setError(`Failed to parse file: ${err instanceof Error ? err.message : "Unknown error"}. Please ensure the CSV file matches the required format.`);
+      console.error("File parsing error:", err);
+      setError(`Failed to parse file: ${err instanceof Error ? err.message : "Unknown error"}. Please ensure the file matches the required format (CSV or Excel).`);
       setParsedTransactions([]);
     } finally {
       setIsParsing(false);
@@ -328,9 +328,9 @@ export function CSVUpload() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-4xl font-display font-bold text-gradient">
-            CSV Upload
+            Bank Statement Upload
           </h1>
-          <p className="text-muted-foreground mt-2">Bulk import transactions from bank statement</p>
+          <p className="text-muted-foreground mt-2">Bulk import transactions from CSV or Excel files</p>
         </div>
         {isGoogleSheetsConfigured() && (
           <Button
@@ -405,7 +405,7 @@ export function CSVUpload() {
           {isParsing && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-sm text-blue-800">
-                ⏳ Parsing CSV file... Please wait.
+                ⏳ Parsing file... Please wait.
               </p>
             </div>
           )}
@@ -413,7 +413,7 @@ export function CSVUpload() {
           {!isParsing && file && parsedTransactions.length === 0 && !error && (
             <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
               <p className="text-sm text-yellow-800">
-                ⚠️ File uploaded but no transactions were found. Please check the CSV format.
+                ⚠️ File uploaded but no transactions were found. Please check the file format.
               </p>
             </div>
           )}
