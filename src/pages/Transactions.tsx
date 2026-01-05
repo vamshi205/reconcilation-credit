@@ -483,7 +483,7 @@ export function Transactions() {
         });
       } else {
         // Default: newest first by date
-        filtered = [...filtered].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      filtered = [...filtered].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       }
     }
 
@@ -541,7 +541,7 @@ export function Transactions() {
         
         // If transaction has a party name, check for suggestions for that name
         if (transaction.partyName) {
-          foundSuggestion = await PartyMappingService.getSuggestedName(transaction.partyName);
+          foundSuggestion = await PartyMappingService.getSuggestedName(transaction.partyName, transaction.description);
           if (foundSuggestion && foundSuggestion.trim().length > 0 && foundSuggestion !== transaction.partyName) {
             setPartySuggestions(prev => ({ ...prev, [transaction.id]: [foundSuggestion] }));
             loadingSuggestionsRef.current.delete(transaction.id);
@@ -581,7 +581,7 @@ export function Transactions() {
               if (!shouldExclude && extracted.length > 3 && extracted.length < 100) {
                 extractedPartyName = extracted;
                 // Check if we have a learned mapping for this extracted name
-                foundSuggestion = await PartyMappingService.getSuggestedName(extractedLower);
+                foundSuggestion = await PartyMappingService.getSuggestedName(extractedLower, transaction.description);
                 // Only use suggestion if it's not blank
                 if (!foundSuggestion || foundSuggestion.trim().length === 0) {
                   foundSuggestion = null;
@@ -611,7 +611,7 @@ export function Transactions() {
                 const extracted = match[1].trim().toLowerCase();
                 // Filter out "SRI RAJA" patterns and other unwanted text
                 if (!extracted.includes('sri raja') && extracted.length > 3 && extracted.length < 100) {
-                  foundSuggestion = await PartyMappingService.getSuggestedName(extracted);
+                  foundSuggestion = await PartyMappingService.getSuggestedName(extracted, transaction.description);
                   // Only use suggestion if it's not blank
                   if (foundSuggestion && foundSuggestion.trim().length > 0) {
                     break;
@@ -640,7 +640,7 @@ export function Transactions() {
               for (let len = 2; len <= 4 && i + len <= parts.length; len++) {
                 const phrase = parts.slice(i, i + len).join(" ").toLowerCase();
                 if (phrase.length > 5 && phrase.length < 80) {
-                  foundSuggestion = await PartyMappingService.getSuggestedName(phrase);
+                  foundSuggestion = await PartyMappingService.getSuggestedName(phrase, transaction.description);
                   // Only use suggestion if it's not blank
                   if (foundSuggestion && foundSuggestion.trim().length > 0) {
                     break;
@@ -669,7 +669,7 @@ export function Transactions() {
               .toLowerCase();
             
             if (cleanedDesc.length > 5) {
-              foundSuggestion = await PartyMappingService.getSuggestedName(cleanedDesc);
+              foundSuggestion = await PartyMappingService.getSuggestedName(cleanedDesc, transaction.description);
               // Only use suggestion if it's not blank
               if (!foundSuggestion || foundSuggestion.trim().length === 0) {
                 foundSuggestion = null;
@@ -774,12 +774,12 @@ export function Transactions() {
         setInlineLoading((prev) => ({ ...prev, [id]: true }));
         
         try {
-          // Check for duplicate Vyapar reference number
-          const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
-          const duplicateCheck = await checkDuplicateVyaparRef(finalValue.trim(), id);
-          
-          if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
-            const existing = duplicateCheck.existingTransaction;
+        // Check for duplicate Vyapar reference number
+        const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
+        const duplicateCheck = await checkDuplicateVyaparRef(finalValue.trim(), id);
+        
+        if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
+          const existing = duplicateCheck.existingTransaction;
             
             setInlineErrors((prev) => ({
               ...prev,
@@ -794,47 +794,47 @@ export function Transactions() {
               delete newLoading[id];
               return newLoading;
             });
-            return; // Prevent submission
-          }
-          
-          // Remove hold status when completing transaction
-          const updates: any = {
-            added_to_vyapar: true,
-            vyapar_reference_number: finalValue.trim(),
-          };
-          
-          // If transaction was on hold, remove hold status
-          if (transaction.hold) {
-            updates.hold = false;
-          }
-          
-          // Ensure checkbox is checked and save to Google Sheets
-          // Update local state first for immediate UI feedback
-          setTransactions((prev) =>
-            prev.map((t) =>
-              t.id === id
-                ? {
-                    ...t,
-                    added_to_vyapar: true,
-                    vyapar_reference_number: finalValue.trim(),
-                    hold: false, // Remove hold when completed
-                    date: t.date, // Explicitly preserve original date
-                  }
-                : t
-            )
-          );
-          
-          // Clear local input value
-          setInputValues((prev) => {
-            const newValues = { ...prev };
-            delete newValues[id];
-            return newValues;
-          });
-          
-          // Clear focus tracking
-          focusedInputId.current = null;
-          
-          // Save to Google Sheets (this will show error if it fails)
+          return; // Prevent submission
+        }
+        
+        // Remove hold status when completing transaction
+        const updates: any = {
+          added_to_vyapar: true,
+          vyapar_reference_number: finalValue.trim(),
+        };
+        
+        // If transaction was on hold, remove hold status
+        if (transaction.hold) {
+          updates.hold = false;
+        }
+        
+        // Ensure checkbox is checked and save to Google Sheets
+        // Update local state first for immediate UI feedback
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  added_to_vyapar: true,
+                  vyapar_reference_number: finalValue.trim(),
+                  hold: false, // Remove hold when completed
+                  date: t.date, // Explicitly preserve original date
+                }
+              : t
+          )
+        );
+        
+        // Clear local input value
+        setInputValues((prev) => {
+          const newValues = { ...prev };
+          delete newValues[id];
+          return newValues;
+        });
+        
+        // Clear focus tracking
+        focusedInputId.current = null;
+        
+        // Save to Google Sheets (this will show error if it fails)
           await StorageService.updateTransaction(id, updates, transaction);
           
           // Clear loading state
@@ -878,33 +878,33 @@ export function Transactions() {
       confirmText: "Yes, Cancel Transaction",
       cancelText: "Keep Transaction",
       onConfirm: () => {
-        StorageService.updateTransaction(id, {
-          added_to_vyapar: false,
-          vyapar_reference_number: undefined,
-        }, transaction);
-        
-        // Clear focus tracking
-        focusedInputId.current = null;
-        
-        // Update local state
-        setTransactions((prev) =>
-          prev.map((t) =>
-            t.id === id
-              ? {
-                  ...t,
-                  added_to_vyapar: false,
-                  vyapar_reference_number: undefined,
+    StorageService.updateTransaction(id, {
+      added_to_vyapar: false,
+      vyapar_reference_number: undefined,
+    }, transaction);
+    
+    // Clear focus tracking
+    focusedInputId.current = null;
+    
+    // Update local state
+    setTransactions((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              added_to_vyapar: false,
+              vyapar_reference_number: undefined,
                   date: t.date, // Explicitly preserve original date
-                }
-              : t
-          )
-        );
-        
-        // Clear local input value
-        setInputValues((prev) => {
-          const newValues = { ...prev };
-          delete newValues[id];
-          return newValues;
+            }
+          : t
+      )
+    );
+    
+    // Clear local input value
+    setInputValues((prev) => {
+      const newValues = { ...prev };
+      delete newValues[id];
+      return newValues;
         });
         
         setConfirmationModal(null);
@@ -1163,7 +1163,7 @@ export function Transactions() {
         paginatedTransactions.forEach(t => {
           if (t.partyName && !loadingSuggestionsRef.current.has(t.id)) {
             loadingSuggestionsRef.current.add(t.id);
-            PartyMappingService.getSuggestedName(t.partyName).then(suggested => {
+            PartyMappingService.getSuggestedName(t.partyName, t.description).then(suggested => {
               if (suggested && suggested.trim().length > 0 && suggested !== t.partyName) {
                 setPartySuggestions(prev => ({ ...prev, [t.id]: [suggested] }));
               }
@@ -1196,7 +1196,7 @@ export function Transactions() {
 
   // Handle Hold status
   const handleSetHold = (transactionId: string) => {
-    const transaction = transactions.find((t) => t.id === transactionId);
+      const transaction = transactions.find((t) => t.id === transactionId);
     if (!transaction) return;
     
     setConfirmationModal({
@@ -1236,10 +1236,10 @@ export function Transactions() {
       confirmText: "Yes, Remove Hold",
       cancelText: "Cancel",
       onConfirm: () => {
-        StorageService.updateTransaction(transactionId, { hold: false }, transaction);
-        setTransactions((prev) =>
-          prev.map((t) => (t.id === transactionId ? { ...t, hold: false, date: t.date } : t))
-        );
+    StorageService.updateTransaction(transactionId, { hold: false }, transaction);
+    setTransactions((prev) =>
+      prev.map((t) => (t.id === transactionId ? { ...t, hold: false, date: t.date } : t))
+    );
         setConfirmationModal(null);
       }
     });
@@ -1247,7 +1247,7 @@ export function Transactions() {
 
   // Handle Set Self Transfer
   const handleSetSelfTransfer = (transactionId: string) => {
-    const transaction = transactions.find((t) => t.id === transactionId);
+      const transaction = transactions.find((t) => t.id === transactionId);
     if (!transaction) return;
     
     setConfirmationModal({
@@ -1302,10 +1302,10 @@ export function Transactions() {
       confirmText: "Yes, Remove Self Transfer",
       cancelText: "Cancel",
       onConfirm: () => {
-        StorageService.updateTransaction(transactionId, { selfTransfer: false }, transaction);
-        setTransactions((prev) =>
-          prev.map((t) => (t.id === transactionId ? { ...t, selfTransfer: false, date: t.date } : t))
-        );
+    StorageService.updateTransaction(transactionId, { selfTransfer: false }, transaction);
+    setTransactions((prev) =>
+      prev.map((t) => (t.id === transactionId ? { ...t, selfTransfer: false, date: t.date } : t))
+    );
         setConfirmationModal(null);
       }
     });
@@ -1383,7 +1383,7 @@ export function Transactions() {
         
         // If we extracted a name, try to get suggestion for it
         if (extractedName) {
-          const suggested = await PartyMappingService.getSuggestedName(extractedName);
+          const suggested = await PartyMappingService.getSuggestedName(extractedName, editingTransaction.description);
           if (suggested && suggested.trim().length > 0) {
             foundSuggestions = [suggested];
           }
@@ -1403,7 +1403,7 @@ export function Transactions() {
         
         const tempSuggestions: string[] = [];
         for (const part of parts) {
-          const suggested = await PartyMappingService.getSuggestedName(part);
+          const suggested = await PartyMappingService.getSuggestedName(part, editingTransaction.description);
           if (suggested && suggested.trim().length > 0 && !tempSuggestions.includes(suggested)) {
             tempSuggestions.push(suggested);
             if (tempSuggestions.length >= 3) break;
@@ -1451,60 +1451,60 @@ export function Transactions() {
     // Check for duplicate Vyapar reference number
     setIsSavingToSheets(true);
     try {
-      const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
-      const duplicateCheck = await checkDuplicateVyaparRef(vyaparRef, editingTransaction.id);
+    const { checkDuplicateVyaparRef, verifyTransactionUpdate } = await import('../services/googleSheetsService');
+    const duplicateCheck = await checkDuplicateVyaparRef(vyaparRef, editingTransaction.id);
+    
+    if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
+      const existing = duplicateCheck.existingTransaction;
+      const existingDate = existing.date || 'N/A';
+      const existingAmount = existing.amount || 0;
+      const existingParty = existing.partyName || 'N/A';
       
-      if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
-        const existing = duplicateCheck.existingTransaction;
-        const existingDate = existing.date || 'N/A';
-        const existingAmount = existing.amount || 0;
-        const existingParty = existing.partyName || 'N/A';
-        
         setDuplicateError({
           message: `This Vyapar reference number "${vyaparRef}" already exists`,
           existingTransaction: existing,
           transactionId: duplicateCheck.existingTransactionId
         });
         setIsSavingToSheets(false);
-        return; // Prevent submission
-      }
-      
-      // Update transaction with party name and Vyapar ref
-      // NEVER UPDATE DATE - preserve original date
+      return; // Prevent submission
+    }
+    
+    // Update transaction with party name and Vyapar ref
+    // NEVER UPDATE DATE - preserve original date
       const now = new Date().toISOString();
-      const updatedTransaction = {
-        ...editingTransaction,
-        partyName,
-        vyapar_reference_number: vyaparRef,
-        added_to_vyapar: true,
-        hold: false, // Remove hold if it was on hold
-        date: editingTransaction.date, // Explicitly preserve original date
+    const updatedTransaction = {
+      ...editingTransaction,
+      partyName,
+      vyapar_reference_number: vyaparRef,
+      added_to_vyapar: true,
+      hold: false, // Remove hold if it was on hold
+      date: editingTransaction.date, // Explicitly preserve original date
         updatedAt: now, // Set updatedAt to current time for sorting
-      };
-      
-      // Update local state first
-      setTransactions((prev) =>
-        prev.map((t) =>
-          t.id === editingTransaction.id ? updatedTransaction : t
-        )
-      );
-      
-      // Save to Google Sheets (this will show error if it fails)
+    };
+    
+    // Update local state first
+    setTransactions((prev) =>
+      prev.map((t) =>
+        t.id === editingTransaction.id ? updatedTransaction : t
+      )
+    );
+    
+    // Save to Google Sheets (this will show error if it fails)
       await StorageService.updateTransaction(editingTransaction.id, {
-        partyName,
-        vyapar_reference_number: vyaparRef,
-        added_to_vyapar: true,
-        hold: false,
+      partyName,
+      vyapar_reference_number: vyaparRef,
+      added_to_vyapar: true,
+      hold: false,
         updatedAt: now, // Include updatedAt in the update
-      }, updatedTransaction);
-      
-      // Learn from narration
-      if (editingTransaction.description) {
-        PartyMappingService.autoTrainFromNarration(editingTransaction.description, partyName).catch(err => {
-          console.error('Error training party mapping:', err);
-        });
-      }
-      
+    }, updatedTransaction);
+    
+    // Learn from narration
+    if (editingTransaction.description) {
+      PartyMappingService.autoTrainFromNarration(editingTransaction.description, partyName).catch(err => {
+        console.error('Error training party mapping:', err);
+      });
+    }
+    
       // Show success message
       setSaveSuccess(true);
       
@@ -1683,15 +1683,20 @@ export function Transactions() {
               vertical-align: top;
             }
             .date-col {
-              width: 15%;
+              width: 12%;
               white-space: nowrap;
             }
             .narration-col {
-              width: 55%;
+              width: 45%;
             }
             .party-col {
-              width: 30%;
+              width: 25%;
               min-height: 30px;
+            }
+            .amount-col {
+              width: 18%;
+              text-align: right;
+              white-space: nowrap;
             }
             tr:nth-child(even) {
               background-color: #f9f9f9;
@@ -1710,6 +1715,7 @@ export function Transactions() {
                 <th class="date-col">Date</th>
                 <th class="narration-col">Narration</th>
                 <th class="party-col">Party Name</th>
+                <th class="amount-col">Amount</th>
               </tr>
             </thead>
             <tbody>
@@ -1719,6 +1725,7 @@ export function Transactions() {
                     <td class="date-col">${formatDate(t.date)}</td>
                     <td class="narration-col">${t.description || ''}</td>
                     <td class="party-col">&nbsp;</td>
+                    <td class="amount-col">₹${t.amount.toLocaleString('en-IN')}</td>
                   </tr>
                 `;
               }).join('')}
@@ -1758,17 +1765,17 @@ export function Transactions() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {isGoogleSheetsConfigured() && (
-            <Button
-              variant="outline"
-              onClick={loadTransactions}
-              disabled={isLoading}
+        {isGoogleSheetsConfigured() && (
+          <Button
+            variant="outline"
+            onClick={loadTransactions}
+            disabled={isLoading}
               className="flex items-center gap-1 sm:gap-2 border-slate-300 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 shadow-sm text-xs sm:text-sm px-2 sm:px-4"
-            >
+          >
               <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${isLoading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{isLoading ? 'Loading...' : 'Refresh'}</span>
-            </Button>
-          )}
+          </Button>
+        )}
           <Button
             variant="outline"
             onClick={() => {
@@ -1968,42 +1975,42 @@ export function Transactions() {
                   />
                 </div>
                 <div className="w-full sm:w-auto flex gap-2">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={handlePrint}
-                    disabled={filteredTransactions.length === 0}
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handlePrint}
+                  disabled={filteredTransactions.length === 0}
                     className="h-9 flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm"
-                    title="Print/Save as PDF"
-                  >
+                  title="Print/Save as PDF"
+                >
                     <Printer className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     <span className="hidden sm:inline">Print PDF</span>
                     <span className="sm:hidden">Print</span>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      if (view === "pending") {
-                        setDateFromPending("");
-                        setDateToPending("");
-                      } else if (view === "completed") {
-                        setDateFromCompleted("");
-                        setDateToCompleted("");
-                      } else if (view === "hold") {
-                        setDateFromHold("");
-                        setDateToHold("");
-                      } else {
-                        setDateFromSelfTransfer("");
-                        setDateToSelfTransfer("");
-                      }
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (view === "pending") {
+                      setDateFromPending("");
+                      setDateToPending("");
+                    } else if (view === "completed") {
+                      setDateFromCompleted("");
+                      setDateToCompleted("");
+                    } else if (view === "hold") {
+                      setDateFromHold("");
+                      setDateToHold("");
+                    } else {
+                      setDateFromSelfTransfer("");
+                      setDateToSelfTransfer("");
+                    }
                       setSortColumn("date");
                       setSortDirection("desc");
-                    }}
+                  }}
                     className="h-9 text-xs sm:text-sm"
-                  >
-                    Clear
-                  </Button>
+                >
+                  Clear
+                </Button>
                 </div>
               </div>
             </CardContent>
@@ -2031,44 +2038,44 @@ export function Transactions() {
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4">
               <div className="flex flex-col sm:flex-row flex-wrap items-end gap-3 sm:gap-4">
-                {/* Date Range Filters */}
+          {/* Date Range Filters */}
                 <div className="w-full sm:flex-1 sm:min-w-[140px]">
                   <Label htmlFor="dateFromCompleted" className="text-xs font-semibold mb-1.5 block">From Date</Label>
-                  <DatePicker
-                    id="dateFromCompleted"
-                    value={dateFrom}
-                    onChange={(value) => {
-                      if (view === "completed") setDateFromCompleted(value);
-                      else if (view === "hold") setDateFromHold(value);
-                      else setDateFromSelfTransfer(value);
-                    }}
-                    placeholder="DD/MM/YYYY"
+              <DatePicker
+                id="dateFromCompleted"
+                value={dateFrom}
+                onChange={(value) => {
+                  if (view === "completed") setDateFromCompleted(value);
+                  else if (view === "hold") setDateFromHold(value);
+                  else setDateFromSelfTransfer(value);
+                }}
+                placeholder="DD/MM/YYYY"
                     className="h-9 text-sm w-full"
-                  />
-                </div>
+              />
+            </div>
                 <div className="w-full sm:flex-1 sm:min-w-[140px]">
                   <Label htmlFor="dateToCompleted" className="text-xs font-semibold mb-1.5 block">To Date</Label>
-                  <DatePicker
-                    id="dateToCompleted"
-                    value={dateTo}
-                    onChange={(value) => {
-                      if (view === "completed") setDateToCompleted(value);
-                      else if (view === "hold") setDateToHold(value);
+              <DatePicker
+                id="dateToCompleted"
+                value={dateTo}
+                onChange={(value) => {
+                  if (view === "completed") setDateToCompleted(value);
+                  else if (view === "hold") setDateToHold(value);
                       else setDateFromSelfTransfer(value);
-                    }}
-                    placeholder="DD/MM/YYYY"
+                }}
+                placeholder="DD/MM/YYYY"
                     className="h-9 text-sm w-full"
-                  />
-                </div>
+              />
+            </div>
                 
                 {/* Sort by Date */}
                 <div className="w-full sm:w-auto sm:min-w-[160px]">
                   <Label className="text-xs font-semibold mb-1.5 block">Sort by Date</Label>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
                       variant={sortColumn === "date" && sortDirection === "asc" ? "default" : "outline"}
-                      size="sm"
+                    size="sm"
                       onClick={() => {
                         setSortColumn("date");
                         setSortDirection("asc");
@@ -2076,12 +2083,12 @@ export function Transactions() {
                       className="flex-1 h-9 text-xs sm:text-sm"
                     >
                       <ArrowUp className="h-3.5 w-3.5 mr-1" />
-                      Oldest
-                    </Button>
-                    <Button
-                      type="button"
+                    Oldest
+                  </Button>
+                  <Button
+                    type="button"
                       variant={sortColumn === "date" && sortDirection === "desc" ? "default" : "outline"}
-                      size="sm"
+                    size="sm"
                       onClick={() => {
                         setSortColumn("date");
                         setSortDirection("desc");
@@ -2089,10 +2096,10 @@ export function Transactions() {
                       className="flex-1 h-9 text-xs sm:text-sm"
                     >
                       <ArrowDown className="h-3.5 w-3.5 mr-1" />
-                      Newest
-                    </Button>
-                  </div>
+                    Newest
+                  </Button>
                 </div>
+            </div>
                 
                 {/* Print Button */}
                 <div className="w-full sm:w-auto sm:min-w-[120px]">
@@ -2114,30 +2121,30 @@ export function Transactions() {
                 {/* Clear All Button */}
                 <div className="w-full sm:w-auto sm:min-w-[90px]">
                   <Label className="text-xs font-semibold mb-1.5 block opacity-0">Clear</Label>
-                  <Button
-                    variant="outline"
+              <Button
+                variant="outline"
                     size="sm"
-                    onClick={() => {
-                      if (view === "completed") {
-                        setDateFromCompleted("");
-                        setDateToCompleted("");
-                      } else if (view === "hold") {
-                        setDateFromHold("");
-                        setDateToHold("");
-                      } else {
-                        setDateFromSelfTransfer("");
-                        setDateToSelfTransfer("");
-                      }
+                onClick={() => {
+                  if (view === "completed") {
+                    setDateFromCompleted("");
+                    setDateToCompleted("");
+                  } else if (view === "hold") {
+                    setDateFromHold("");
+                    setDateToHold("");
+                  } else {
+                    setDateFromSelfTransfer("");
+                    setDateToSelfTransfer("");
+                  }
                       setSortColumn(null);
-                    }}
+                }}
                     className="h-9 w-full text-xs sm:text-sm"
-                  >
-                    Clear All
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              >
+                  Clear All
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
         </div>
       )}
 
@@ -2168,7 +2175,7 @@ export function Transactions() {
                           </th>
                           <th 
                             className="p-2 sm:p-3 text-left text-xs sm:text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
-                            style={{ width: getColumnWidth('date', 120) }}
+                            style={{ width: getColumnWidth('date', 130) }}
                           >
                             <div className="flex items-center gap-2">
                               <span>Date</span>
@@ -2186,13 +2193,13 @@ export function Transactions() {
                               onMouseDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleResizeStart(e, 'date', getColumnWidth('date', 120));
+                                handleResizeStart(e, 'date', getColumnWidth('date', 130));
                               }}
                             />
                           </th>
                           <th 
                             className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
-                            style={{ width: getColumnWidth('narration', 300) }}
+                            style={{ width: getColumnWidth('narration', 400) }}
                           >
                             <div className="flex items-center gap-2">
                               <span>Narration</span>
@@ -2210,13 +2217,13 @@ export function Transactions() {
                               onMouseDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleResizeStart(e, 'narration', getColumnWidth('narration', 300));
+                                handleResizeStart(e, 'narration', getColumnWidth('narration', 400));
                               }}
                             />
                           </th>
                           <th 
                             className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
-                            style={{ width: getColumnWidth('bankRef', 120) }}
+                            style={{ width: getColumnWidth('bankRef', 140) }}
                           >
                             Bank Ref No.
                             <div
@@ -2224,13 +2231,13 @@ export function Transactions() {
                               onMouseDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleResizeStart(e, 'bankRef', getColumnWidth('bankRef', 120));
+                                handleResizeStart(e, 'bankRef', getColumnWidth('bankRef', 140));
                               }}
                             />
                           </th>
                           <th 
                             className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
-                            style={{ width: getColumnWidth('amount', 120) }}
+                            style={{ width: getColumnWidth('amount', 130) }}
                           >
                             <div className="flex items-center gap-2">
                               <span>Amount</span>
@@ -2248,7 +2255,7 @@ export function Transactions() {
                               onMouseDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleResizeStart(e, 'amount', getColumnWidth('amount', 120));
+                                handleResizeStart(e, 'amount', getColumnWidth('amount', 130));
                               }}
                             />
                           </th>
@@ -2479,7 +2486,7 @@ export function Transactions() {
                   {view !== "selfTransfer" && (
                     <th 
                       className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
-                      style={{ width: getColumnWidth('party', 150) }}
+                            style={{ width: getColumnWidth('party', 180) }}
                     >
                       <div className="flex items-center gap-2">
                         <span>Party</span>
@@ -2497,7 +2504,7 @@ export function Transactions() {
                         onMouseDown={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          handleResizeStart(e, 'party', getColumnWidth('party', 150));
+                                handleResizeStart(e, 'party', getColumnWidth('party', 180));
                         }}
                       />
                     </th>
@@ -2515,8 +2522,8 @@ export function Transactions() {
                         title="Sort by amount"
                       >
                         {getSortIcon("amount")}
-                      </button>
-                    </div>
+                        </button>
+                      </div>
                     <div
                       className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-blue-400 bg-transparent z-10"
                       onMouseDown={(e) => {
@@ -2525,11 +2532,11 @@ export function Transactions() {
                         handleResizeStart(e, 'amount', getColumnWidth('amount', 120));
                       }}
                     />
-                  </th>
+                    </th>
                   {(view !== "hold" && view !== "selfTransfer") && (
                     <th 
                       className="p-3 text-left text-sm font-bold text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300 relative"
-                      style={{ width: getColumnWidth('vyaparRef', 150) }}
+                            style={{ width: getColumnWidth('vyaparRef', 180) }}
                     >
                       <div className="flex items-center gap-2">
                         <span>Vyapar Ref No.</span>
@@ -2547,7 +2554,7 @@ export function Transactions() {
                         onMouseDown={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          handleResizeStart(e, 'vyaparRef', getColumnWidth('vyaparRef', 150));
+                                handleResizeStart(e, 'vyaparRef', getColumnWidth('vyaparRef', 180));
                         }}
                       />
                     </th>
@@ -2608,8 +2615,8 @@ export function Transactions() {
                         </td>
                         {view !== "selfTransfer" && (
                           <td className="p-2 sm:p-3 text-xs sm:text-sm text-muted-foreground border-r border-slate-300" style={{ width: getColumnWidth('party', 150) }}>
-                            <div className="flex items-center gap-2">
-                              {(() => {
+                          <div className="flex items-center gap-2">
+                            {(() => {
                               // Check if transaction is completed
                               const isAdded = transaction.added_to_vyapar || transaction.inVyapar;
                               const hasRef = Boolean(
@@ -2901,7 +2908,7 @@ export function Transactions() {
                             {inlineLoading[transaction.id] && (
                               <div className="mt-2 flex items-center gap-2 text-xs text-blue-600">
                                 <RefreshCw className="h-4 w-4 animate-spin" />
-                                <span>Saving to Google Sheets...</span>
+                                <span>Saving data. Please wait...</span>
                               </div>
                             )}
                           </div>
@@ -2918,20 +2925,20 @@ export function Transactions() {
                               // Show cancel button only for completed transactions
                               if (isCompleted && view === "completed") {
                                 return (
-                                  <button
-                                    type="button"
+                                <button
+                                  type="button"
                                     disabled={!isSelected}
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={(e) => {
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={(e) => {
                                       if (!isSelected) {
-                                        e.preventDefault();
-                                        e.stopPropagation();
+                                    e.preventDefault();
+                                    e.stopPropagation();
                                         return;
                                       }
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      handleCancel(transaction.id);
-                                    }}
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleCancel(transaction.id);
+                                  }}
                                     className={cn(
                                       "flex-shrink-0 transition-opacity p-1.5 rounded border",
                                       isSelected 
@@ -2939,9 +2946,9 @@ export function Transactions() {
                                         : "opacity-40 cursor-not-allowed border-gray-300 bg-gray-100"
                                     )}
                                     title={isSelected ? "Cancel transaction and move back to pending" : "Please select this transaction first"}
-                                  >
-                                    <X className="h-5 w-5 text-red-600" />
-                                  </button>
+                                >
+                                  <X className="h-5 w-5 text-red-600" />
+                                </button>
                                 );
                               }
                               return null;
@@ -3217,8 +3224,8 @@ export function Transactions() {
               <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <RefreshCw className="h-5 w-5 text-blue-600 animate-spin" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-blue-900">Saving to Google Sheets...</p>
-                  <p className="text-xs text-blue-700 mt-1">Please wait while we save your transaction</p>
+                  <p className="text-sm font-medium text-blue-900">Saving data. Please wait...</p>
+                  <p className="text-xs text-blue-700 mt-1">Your transaction is being saved</p>
                 </div>
               </div>
             )}
@@ -3290,7 +3297,7 @@ export function Transactions() {
                   {isSavingToSheets ? (
                     <>
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Saving...
+                      Saving data...
                     </>
                   ) : (
                     "Submit & Move to Completed"

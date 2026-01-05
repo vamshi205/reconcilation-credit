@@ -105,11 +105,49 @@ export class PartyMappingService {
   }
 
   /**
+   * Keyword-based recommendations
+   * Maps specific keywords in narration to recommended party names
+   */
+  private static getKeywordRecommendations(narration: string): string[] {
+    const keywordMap: Record<string, string> = {
+      'hanish': 'JYOTHI MULTI SPECIALITY HOSPITAL',
+      // Add more keyword mappings here as needed
+      // Format: 'keyword': 'Recommended Party Name'
+    };
+
+    const narrationLower = narration.toLowerCase();
+    const recommendations: string[] = [];
+
+    for (const [keyword, partyName] of Object.entries(keywordMap)) {
+      if (narrationLower.includes(keyword.toLowerCase())) {
+        recommendations.push(partyName);
+      }
+    }
+
+    return recommendations;
+  }
+
+  /**
    * Find party names from narration using word-by-word matching against parties list
    * Returns top 2-3 matches
    */
   static async findPartiesFromNarration(narration: string, maxMatches: number = 3): Promise<string[]> {
     if (!narration || narration.trim().length < 5) return [];
+    
+    // First, check for keyword-based recommendations
+    const keywordRecommendations = this.getKeywordRecommendations(narration);
+    if (keywordRecommendations.length > 0) {
+      // Return keyword recommendations first, then fill with word-by-word matches if needed
+      const parties = await this.getParties();
+      if (parties.length > 0) {
+        const wordMatches = await findMatchingParties(narration, parties, maxMatches - keywordRecommendations.length);
+        // Combine keyword recommendations with word matches, removing duplicates
+        const combined = [...keywordRecommendations, ...wordMatches];
+        const unique = Array.from(new Set(combined));
+        return unique.slice(0, maxMatches);
+      }
+      return keywordRecommendations.slice(0, maxMatches);
+    }
     
     const parties = await this.getParties();
     if (parties.length === 0) return [];
@@ -161,8 +199,16 @@ export class PartyMappingService {
    * Get suggested name for an original name (async)
    * Checks for exact match first, then partial matches
    */
-  static async getSuggestedName(originalName: string): Promise<string | null> {
+  static async getSuggestedName(originalName: string, narration?: string): Promise<string | null> {
     if (!originalName) return null;
+    
+    // First, check for keyword-based recommendations if narration is provided
+    if (narration) {
+      const keywordRecommendations = this.getKeywordRecommendations(narration);
+      if (keywordRecommendations.length > 0) {
+        return keywordRecommendations[0]; // Return the first keyword recommendation
+      }
+    }
     
     // Normalize the input for lookup
     const normalized = originalName.trim().toLowerCase().replace(/\s+/g, " ");
@@ -319,15 +365,18 @@ export class PartyMappingService {
     const mappings = await this.getMappings();
     const index = mappings.findIndex((m) => m.id === id);
     if (index >= 0) {
-      mappings[index] = {
+      const updatedMapping = {
         ...mappings[index],
         ...updates,
         lastUsed: new Date().toISOString(),
       };
+      mappings[index] = updatedMapping;
       mappingsCache = mappings;
       mappingsCacheTime = Date.now();
-      await updatePartyMappingInSheets(mappings[index]);
-      await this.saveMappings(mappings);
+      // Only update in Google Sheets, don't call saveMappings (which would try to save all mappings again)
+      await updatePartyMappingInSheets(updatedMapping);
+      // Invalidate cache to force refresh on next getMappings call
+      mappingsCacheTime = 0;
     }
   }
 
