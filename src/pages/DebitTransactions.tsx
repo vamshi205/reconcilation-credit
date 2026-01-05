@@ -127,7 +127,7 @@ export function DebitTransactions() {
           console.error('Error fetching from Google Sheets:', error);
           // On error, show empty list (don't fallback to local storage)
           allTransactions = [];
-          alert('Failed to load debit transactions from Google Sheets. Please check your connection and try refreshing.');
+          alert('Failed to load debit transactions from database. Please check your connection and try refreshing.');
         }
       } else {
         // If Google Sheets not configured, show empty list

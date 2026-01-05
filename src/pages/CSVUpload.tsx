@@ -312,9 +312,9 @@ export function CSVUpload() {
     try {
       const result = await testGoogleSheetsConnection();
       if (result.success) {
-        alert('✓ Google Sheets connection test successful!');
+        alert('✓ Database connection test successful!');
       } else {
-        alert(`✗ Google Sheets connection failed:\n\n${result.error}\n\nPlease check:\n1. Script is deployed as Web App\n2. "Who has access" is set to "Anyone"\n3. Script is authorized`);
+        alert(`✗ Database connection failed:\n\n${result.error}\n\nPlease check:\n1. Script is deployed as Web App\n2. "Who has access" is set to "Anyone"\n3. Script is authorized`);
       }
     } catch (error) {
       alert(`✗ Test failed: ${error instanceof Error ? error.message : 'Unknown error'}`);

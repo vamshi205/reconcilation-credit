@@ -28,42 +28,55 @@ export function Dashboard() {
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   // Load transactions from Google Sheets
   useEffect(() => {
-    const loadTransactions = async () => {
-      setIsLoading(true);
+    const loadTransactions = async (isInitial: boolean = false) => {
+      // Only show loading on initial load
+      if (isInitial) {
+        setIsLoading(true);
+      }
       if (isGoogleSheetsConfigured()) {
         try {
-          console.log('Loading transactions from Google Sheets...');
+          console.log('Loading transactions from database...');
           const sheetsTransactions = await fetchTransactionsFromSheets();
-          console.log(`Fetched ${sheetsTransactions.length} transactions from Google Sheets`);
+          console.log(`Fetched ${sheetsTransactions.length} transactions from database`);
           // Only show deposits (credits)
           const creditTransactions = sheetsTransactions.filter((t) => t.type === "credit");
           console.log(`Filtered to ${creditTransactions.length} credit transactions`);
           setTransactions(creditTransactions);
         } catch (error) {
           console.error('Error fetching transactions for dashboard:', error);
-          // Show error message to user
-          alert(`Failed to load transactions from Google Sheets.\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease check:\n1. Google Sheets URL is configured\n2. Google Apps Script is authorized\n3. Check browser console for details`);
+          // Show error message to user only on initial load
+          if (isInitial) {
+            alert(`Failed to load transactions from database.\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease check:\n1. Database connection is configured\n2. Check browser console for details`);
+          }
           setTransactions([]);
         } finally {
-          setIsLoading(false);
+          if (isInitial) {
+            setIsLoading(false);
+            setIsInitialLoad(false);
+          }
         }
       } else {
-        console.warn('Google Sheets not configured. Cannot load transactions.');
-        // Fallback to local storage if Google Sheets not configured
+        console.warn('Database not configured. Cannot load transactions.');
+        // Fallback to local storage if database not configured
         const localTransactions = StorageService.getTransactions();
         const creditTransactions = localTransactions.filter((t) => t.type === "credit");
         console.log(`Loaded ${creditTransactions.length} transactions from local storage`);
         setTransactions(creditTransactions);
-        setIsLoading(false);
+        if (isInitial) {
+          setIsLoading(false);
+          setIsInitialLoad(false);
+        }
       }
     };
     
-    loadTransactions();
-    // Update stats every 5 seconds to reflect changes
-    const interval = setInterval(loadTransactions, 5000);
+    // Initial load with loading indicator
+    loadTransactions(true);
+    // Update stats every 5 seconds to reflect changes (silent refresh, no loading indicator)
+    const interval = setInterval(() => loadTransactions(false), 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -208,9 +221,9 @@ export function Dashboard() {
             <div className="flex items-start gap-4">
               <AlertCircle className="h-6 w-6 text-orange-600 mt-0.5" />
               <div className="flex-1">
-                <h3 className="font-semibold text-orange-900 mb-2">Google Sheets Not Configured</h3>
+                <h3 className="font-semibold text-orange-900 mb-2">Database Not Configured</h3>
                 <p className="text-sm text-orange-800 mb-3">
-                  Transactions are not loading because Google Sheets is not configured. Please set up your Google Sheets integration.
+                  Transactions are not loading because the database is not configured. Please set up your database integration.
                 </p>
                 <p className="text-xs text-orange-700">
                   <strong>To fix:</strong> Set <code className="bg-orange-100 px-1 rounded">VITE_GOOGLE_SHEETS_APPS_SCRIPT_URL</code> in your Vercel environment variables and redeploy.
@@ -230,7 +243,7 @@ export function Dashboard() {
               <div className="flex-1">
                 <h3 className="font-semibold text-foreground mb-1">Loading Transactions...</h3>
                 <p className="text-sm text-muted-foreground">
-                  Fetching data from Google Sheets. Please wait...
+                  Loading data from database. Please wait...
                 </p>
               </div>
             </div>
