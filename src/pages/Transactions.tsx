@@ -2807,10 +2807,10 @@ export function Transactions() {
                                                       e.stopPropagation();
                                                       handleShowSimilarTransactions(transaction.id, suggested);
                                                     }}
-                                                    className="p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
-                                                    title="Why this suggestion?"
+                                                    className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors flex-shrink-0 border border-blue-200 hover:border-blue-300"
+                                                    title="Why this suggestion? Click to see similar transactions"
                                                   >
-                                                    <Info className="h-3 w-3" />
+                                                    <Info className="h-4 w-4" />
                                                   </button>
                                                   {showSimilarTransactions?.transactionId === transaction.id && 
                                                    showSimilarTransactions?.suggestedName === suggested && (
@@ -3349,8 +3349,8 @@ export function Transactions() {
                             e.stopPropagation();
                             handleShowModalSimilarTransactions(suggestion);
                           }}
-                          className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
-                          title="Why this suggestion?"
+                          className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors flex-shrink-0 border border-blue-200 hover:border-blue-300"
+                          title="Why this suggestion? Click to see similar transactions"
                         >
                           <Info className="h-4 w-4" />
                         </button>
