@@ -339,7 +339,7 @@ export function CSVUpload() {
             disabled={isTestingSheets}
             className="text-sm"
           >
-            {isTestingSheets ? "Testing..." : "Test Google Sheets"}
+            {isTestingSheets ? "Testing..." : "Test Connection"}
           </Button>
         )}
       </div>
