@@ -2,6 +2,8 @@ import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
+import { Select } from "../components/ui/Select";
+import { Label } from "../components/ui/Label";
 import { BankCSVParser } from "../services/bankCSVParser";
 import { BankExcelParser } from "../services/bankExcelParser";
 import { Transaction } from "../types/transaction";
@@ -86,6 +88,7 @@ export function CSVUpload() {
   const [error, setError] = useState<string | null>(null);
   const [isTestingSheets, setIsTestingSheets] = useState(false);
   const [suggestionsCache, setSuggestionsCache] = useState<Record<string, string | null>>({});
+  const [transactionType, setTransactionType] = useState<'credit' | 'debit' | 'both'>('credit');
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -131,22 +134,28 @@ export function CSVUpload() {
       let transactions: Transaction[];
 
       if (fileName.endsWith(".csv")) {
-        console.log("Parsing bank CSV file:", selectedFile.name);
-        transactions = await BankCSVParser.parseFile(selectedFile);
+        console.log("Parsing bank CSV file:", selectedFile.name, "Transaction type:", transactionType);
+        transactions = await BankCSVParser.parseFile(selectedFile, transactionType);
       } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-        console.log("Parsing bank Excel file:", selectedFile.name);
-        transactions = await BankExcelParser.parseFile(selectedFile);
+        console.log("Parsing bank Excel file:", selectedFile.name, "Transaction type:", transactionType);
+        transactions = await BankExcelParser.parseFile(selectedFile, transactionType);
       } else {
         setError("Unsupported file format. Please use CSV or Excel files.");
         setIsParsing(false);
         return;
       }
 
-      console.log("Parsed deposit transactions:", transactions.length);
+      const typeLabel = transactionType === 'credit' ? 'credit' : transactionType === 'debit' ? 'debit' : 'credit and debit';
+      console.log(`Parsed ${typeLabel} transactions:`, transactions.length);
 
       if (transactions.length === 0) {
+        const typeMessage = transactionType === 'credit' 
+          ? 'No credit transactions found. Only rows with Deposit Amt. > 0 are processed.'
+          : transactionType === 'debit'
+          ? 'No debit transactions found. Only rows with Withdrawal Amt. > 0 are processed.'
+          : 'No transactions found. Please check that the file has valid credit or debit amounts.';
         setError(
-          "No deposit transactions found. Only rows with Deposit Amt. > 0 are processed. Please check:\n1. File has headers: Date, Narration, Chq./Ref.No., Value Dt, Withdrawal Amt., Deposit Amt., Closing Balance\n2. Deposit Amt. column contains values > 0\n3. Date format is DD/MM/YYYY or DD-MM-YYYY"
+          `${typeMessage} Please check:\n1. File has headers: Date, Narration, Chq./Ref.No., Value Dt, Withdrawal Amt., Deposit Amt., Closing Balance\n2. ${transactionType === 'credit' ? 'Deposit' : transactionType === 'debit' ? 'Withdrawal' : 'Deposit or Withdrawal'} Amt. column contains values > 0\n3. Date format is DD/MM/YYYY or DD-MM-YYYY`
         );
       } else {
         setParsedTransactions(transactions);
@@ -244,7 +253,7 @@ export function CSVUpload() {
             );
           } else {
             alert(
-              `Successfully imported ${parsedTransactions.length} deposit transactions!\n\n` +
+              `Successfully imported ${parsedTransactions.length} transactions!\n\n` +
               `✓ All transactions sent to Google Sheets.\n` +
               `Note: If you see 401 errors, please authorize the script first.`
             );
@@ -256,7 +265,7 @@ export function CSVUpload() {
           
           if (errorMessage.includes('authorization') || errorMessage.includes('401')) {
             alert(
-              `Successfully imported ${parsedTransactions.length} deposit transactions!\n\n` +
+              `Successfully imported ${parsedTransactions.length} transactions!\n\n` +
               `⚠️ Google Sheets Error: Script requires authorization (401 error).\n\n` +
               `Please:\n` +
               `1. Open this URL in your browser:\n${sheetsURL}\n` +
@@ -268,7 +277,7 @@ export function CSVUpload() {
             );
           } else {
             alert(
-              `Successfully imported ${parsedTransactions.length} deposit transactions!\n\n` +
+              `Successfully imported ${parsedTransactions.length} transactions!\n\n` +
               `⚠️ Warning: Failed to save to Google Sheets.\n` +
               `Error: ${errorMessage}\n\n` +
               `Please check the browser console for details.`
@@ -276,7 +285,7 @@ export function CSVUpload() {
           }
         }
       } else {
-        alert(`Successfully imported ${parsedTransactions.length} deposit transactions!`);
+        alert(`Successfully imported ${parsedTransactions.length} transactions!`);
       }
 
       // Mark file as uploaded after successful save
@@ -349,6 +358,33 @@ export function CSVUpload() {
           <CardTitle>Upload Bank Statement</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
+            <div className="flex-1">
+              <Label htmlFor="transaction-type" className="mb-2 block">
+                Transaction Type
+              </Label>
+              <Select
+                id="transaction-type"
+                value={transactionType}
+                onChange={(e) => {
+                  setTransactionType(e.target.value as 'credit' | 'debit' | 'both');
+                  setFile(null);
+                  setParsedTransactions([]);
+                  setError(null);
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = "";
+                  }
+                }}
+                disabled={isParsing}
+                className="w-full"
+              >
+                <option value="credit">Credit Transactions Only</option>
+                <option value="debit">Debit Transactions Only</option>
+                <option value="both">Both Credit & Debit</option>
+              </Select>
+            </div>
+          </div>
+
           <div className="border-2 border-dashed border-border/60 rounded-lg p-8 text-center hover:border-primary/40 transition-colors">
             <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
             <p className="text-sm text-muted-foreground mb-4">
@@ -377,7 +413,7 @@ export function CSVUpload() {
             <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
               <li>Supported formats: CSV (.csv), Excel (.xls, .xlsx)</li>
               <li>Headers: Date, Narration, Chq./Ref.No., Value Dt, Withdrawal Amt., Deposit Amt., Closing Balance</li>
-              <li>Only rows with Deposit Amt. &gt; 0 will be processed</li>
+              <li>Select transaction type above to filter: Credit, Debit, or Both</li>
               <li>Date format: DD/MM/YYYY or DD-MM-YYYY</li>
               <li>Amount columns should be numeric (no currency symbols)</li>
             </ul>
@@ -539,8 +575,12 @@ export function CSVUpload() {
                           <tr key={idx} className="border-t">
                             <td className="p-2 whitespace-nowrap">{formatDate(t.date)}</td>
                             <td className="p-2">
-                              <span className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
-                                Deposit
+                              <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                t.type === 'credit' 
+                                  ? 'bg-green-100 text-green-800' 
+                                  : 'bg-red-100 text-red-800'
+                              }`}>
+                                {t.type === 'credit' ? 'Credit' : 'Debit'}
                               </span>
                             </td>
                             <td className="p-2 font-medium">₹{t.amount.toLocaleString()}</td>

@@ -21,9 +21,10 @@ export class BankExcelParser {
   /**
    * Parse bank Excel file (.xls or .xlsx) with specific format:
    * Date, Narration, Chq./Ref.No., Value Dt, Withdrawal Amt., Deposit Amt., Closing Balance
-   * Only processes rows where Deposit Amt. > 0
+   * @param file - The Excel file to parse
+   * @param transactionType - 'credit', 'debit', or 'both' to filter transactions
    */
-  static parseFile(file: File): Promise<Transaction[]> {
+  static parseFile(file: File, transactionType: 'credit' | 'debit' | 'both' = 'credit'): Promise<Transaction[]> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
 
@@ -58,34 +59,79 @@ export class BankExcelParser {
             return;
           }
 
-          // First row should be headers
-          const headers = jsonData[0] as any[];
+          // Find the header row (look for row containing "date", "narration", "deposit")
+          let headerRowIndex = -1;
+          let headers: any[] = [];
+          
+          for (let i = 0; i < Math.min(10, jsonData.length); i++) {
+            const row = jsonData[i] as any[];
+            const rowString = row.map(cell => String(cell || "").toLowerCase()).join(" ");
+            if (
+              rowString.includes("date") &&
+              (rowString.includes("narration") || rowString.includes("description")) &&
+              (rowString.includes("deposit") || rowString.includes("credit"))
+            ) {
+              headerRowIndex = i;
+              headers = row;
+              break;
+            }
+          }
+
+          // Fallback to first row if header not found
+          if (headerRowIndex === -1) {
+            headers = jsonData[0] as any[];
+            headerRowIndex = 0;
+          }
+
           if (!headers || headers.length === 0) {
             reject(new Error("Excel file has no headers"));
             return;
           }
 
-          console.log("Excel Headers:", headers);
+          console.log(`Excel Headers found at row ${headerRowIndex + 1}:`, headers);
 
-          // Convert to object array
-          const rows: BankExcelRow[] = jsonData.slice(1).map((row: any[]) => {
+          // Convert to object array (skip header row and any rows before it)
+          const rows: BankExcelRow[] = jsonData.slice(headerRowIndex + 1).map((row: any[]) => {
             const obj: any = {};
             headers.forEach((header, index) => {
               if (header) {
-                obj[header] = row[index] || "";
+                const value = row[index];
+                // Handle undefined, null, empty strings
+                obj[header] = value !== undefined && value !== null ? value : "";
               }
             });
             return obj;
           });
 
           console.log("Excel Rows:", rows.length);
+          
+          // Debug: Log first row to see structure
+          if (rows.length > 0) {
+            console.log("First row sample:", rows[0]);
+            console.log("Available columns:", Object.keys(rows[0]));
+          }
 
-          const transactions = this.parseRows(rows);
+          const transactions = this.parseRows(rows, transactionType);
 
           if (transactions.length === 0) {
+            // Provide more helpful error message with column information
+            const sampleRow = rows.length > 0 ? rows[0] : null;
+            const availableColumns = sampleRow
+              ? Object.keys(sampleRow).join(", ")
+              : "none";
+            const sampleValues = sampleRow
+              ? JSON.stringify(sampleRow, null, 2)
+              : "none";
+            
             reject(
               new Error(
-                "No deposit transactions found. Only rows with Deposit Amt. > 0 are processed."
+                `No deposit transactions found. Only rows with Deposit Amt. > 0 are processed.\n\n` +
+                `Found columns: ${availableColumns}\n` +
+                `Sample row values: ${sampleValues}\n\n` +
+                `Please check:\n` +
+                `1. File has headers: Date, Narration, Deposit Amt. (or similar)\n` +
+                `2. Deposit Amt. column contains values > 0\n` +
+                `3. Date format is valid (DD/MM/YYYY, DD-MM-YYYY, or Excel date format)`
               )
             );
             return;
@@ -111,24 +157,30 @@ export class BankExcelParser {
     });
   }
 
-  static parseRows(rows: BankExcelRow[]): Transaction[] {
+  static parseRows(rows: BankExcelRow[], transactionType: 'credit' | 'debit' | 'both' = 'credit'): Transaction[] {
     const transactions: Transaction[] = [];
+    let skippedCount = 0;
+    let errorCount = 0;
 
     rows.forEach((row, index) => {
       try {
-        const transaction = this.parseRow(row, index);
+        const transaction = this.parseRow(row, index, transactionType);
         if (transaction) {
           transactions.push(transaction);
+        } else {
+          skippedCount++;
         }
       } catch (error) {
+        errorCount++;
         console.warn(`Failed to parse row ${index + 1}:`, row, error);
       }
     });
 
+    console.log(`Parsed ${transactions.length} transactions from ${rows.length} rows (filter: ${transactionType}, skipped: ${skippedCount}, errors: ${errorCount})`);
     return transactions;
   }
 
-  static parseRow(row: BankExcelRow, index: number): Transaction | null {
+  static parseRow(row: BankExcelRow, index: number, transactionType: 'credit' | 'debit' | 'both' = 'credit'): Transaction | null {
     // Use flexible column matching (case-insensitive, handles variations)
     const rowKeys = Object.keys(row);
     const rowLower = Object.fromEntries(
@@ -177,35 +229,123 @@ export class BankExcelParser {
     let depositAmtValue: string | number = 0;
     for (const key of rowKeys) {
       const keyLower = key.toLowerCase().trim();
+      // More flexible matching for deposit columns
       if (
-        (keyLower.includes("deposit") && keyLower.includes("amt")) ||
-        (keyLower.includes("deposit") && keyLower.includes("amount")) ||
+        (keyLower.includes("deposit") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
         keyLower === "deposit amt." ||
         keyLower === "deposit amt" ||
-        keyLower === "deposit amount"
+        keyLower === "deposit amount" ||
+        keyLower === "deposit" ||
+        (keyLower.includes("credit") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
+        keyLower === "credit amt." ||
+        keyLower === "credit amt" ||
+        keyLower === "credit amount" ||
+        keyLower === "cr" ||
+        keyLower === "credit"
       ) {
-        depositAmtValue = row[key] as string | number;
-        break;
+        const value = row[key];
+        // Check if value exists and is not empty
+        if (value !== undefined && value !== null && value !== "" && value !== "undefined" && value !== "null") {
+          depositAmtValue = value as string | number;
+          break;
+        }
       }
     }
-    if (!depositAmtValue) {
+    if (!depositAmtValue || depositAmtValue === 0) {
+      // Try lowercase lookup
       depositAmtValue =
         (rowLower["deposit amt."] as string | number) ||
         (rowLower["deposit amt"] as string | number) ||
         (rowLower["deposit amount"] as string | number) ||
+        (rowLower["deposit"] as string | number) ||
+        (rowLower["credit amt."] as string | number) ||
+        (rowLower["credit amt"] as string | number) ||
+        (rowLower["credit amount"] as string | number) ||
+        (rowLower["credit"] as string | number) ||
+        (rowLower["cr"] as string | number) ||
         0;
     }
 
     const depositAmount = this.parseAmount(depositAmtValue);
 
-    // Debug first few rows
-    if (index < 3) {
-      console.log(`Row ${index + 1}: Deposit amount found: "${depositAmtValue}" = ${depositAmount}`);
+    // Find withdrawal/debit amount column (flexible matching)
+    let withdrawalAmtValue: string | number = 0;
+    for (const key of rowKeys) {
+      const keyLower = key.toLowerCase().trim();
+      if (
+        (keyLower.includes("withdrawal") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
+        keyLower === "withdrawal amt." ||
+        keyLower === "withdrawal amt" ||
+        keyLower === "withdrawal amount" ||
+        keyLower === "withdrawal" ||
+        (keyLower.includes("debit") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
+        keyLower === "debit amt." ||
+        keyLower === "debit amt" ||
+        keyLower === "debit amount" ||
+        keyLower === "debit" ||
+        keyLower === "dr"
+      ) {
+        const value = row[key];
+        if (value !== undefined && value !== null && value !== "" && value !== "undefined" && value !== "null") {
+          withdrawalAmtValue = value as string | number;
+          break;
+        }
+      }
+    }
+    if (!withdrawalAmtValue || withdrawalAmtValue === 0) {
+      withdrawalAmtValue =
+        (rowLower["withdrawal amt."] as string | number) ||
+        (rowLower["withdrawal amt"] as string | number) ||
+        (rowLower["withdrawal amount"] as string | number) ||
+        (rowLower["withdrawal"] as string | number) ||
+        (rowLower["debit amt."] as string | number) ||
+        (rowLower["debit amt"] as string | number) ||
+        (rowLower["debit amount"] as string | number) ||
+        (rowLower["debit"] as string | number) ||
+        (rowLower["dr"] as string | number) ||
+        0;
     }
 
-    // Only process deposits > 0
-    if (depositAmount <= 0) {
-      return null; // Skip withdrawals and zero amounts
+    const withdrawalAmount = this.parseAmount(withdrawalAmtValue);
+
+    // Debug first few rows
+    if (index < 5) {
+      console.log(`Row ${index + 1}: Deposit amount: "${depositAmtValue}" = ${depositAmount}, Withdrawal amount: "${withdrawalAmtValue}" = ${withdrawalAmount}`);
+      console.log(`Row ${index + 1}: Available keys:`, rowKeys);
+    }
+
+    // Determine transaction type and amount based on filter
+    let amount = 0;
+    let type: 'credit' | 'debit' = 'credit';
+    
+    if (depositAmount > 0 && withdrawalAmount > 0) {
+      // Both have values - use the larger one
+      if (depositAmount >= withdrawalAmount) {
+        amount = depositAmount;
+        type = 'credit';
+      } else {
+        amount = withdrawalAmount;
+        type = 'debit';
+      }
+    } else if (depositAmount > 0) {
+      amount = depositAmount;
+      type = 'credit';
+    } else if (withdrawalAmount > 0) {
+      amount = withdrawalAmount;
+      type = 'debit';
+    } else {
+      if (index < 3) {
+        console.log(`Row ${index + 1}: Skipping - no amount found`);
+      }
+      return null; // Skip rows with no amount
+    }
+
+    // Filter based on transactionType parameter
+    if (transactionType === 'credit' && type !== 'credit') {
+      return null;
+    }
+    if (transactionType === 'debit' && type !== 'debit') {
+      return null;
     }
 
     // Find narration column (flexible matching)
@@ -248,15 +388,17 @@ export class BankExcelParser {
     // Leave party name blank - user will enter it manually and system will learn
     const partyName = "";
 
-    // Auto-categorize
-    const category = this.autoCategorize(narration);
+    // Auto-categorize based on transaction type
+    const category = type === 'credit' 
+      ? this.autoCategorize(narration)
+      : this.autoCategorizeDebit(narration);
 
     const transaction: Transaction = {
       id: generateId(),
       date: date.toISOString().split("T")[0],
-      amount: depositAmount,
+      amount: amount,
       description: narration,
-      type: "credit",
+      type: type,
       category: category,
       partyName: partyName,
       referenceNumber: referenceNumber || undefined,
@@ -325,6 +467,9 @@ export class BankExcelParser {
 
   static parseAmount(amountValue: string | number): number {
     if (typeof amountValue === "number") {
+      // Excel date serial numbers are typically between 1 and ~50000 (for dates from 1900 to ~2137)
+      // If the number is in this range and seems like a date, skip it
+      // But amounts can also be in this range, so we'll just return the absolute value
       return Math.abs(amountValue);
     }
 
@@ -333,8 +478,8 @@ export class BankExcelParser {
     // Convert to string and clean
     let cleaned = String(amountValue).trim();
 
-    // Handle empty strings
-    if (cleaned === "" || cleaned === "-" || cleaned === "—") {
+    // Handle empty strings, null, undefined
+    if (cleaned === "" || cleaned === "-" || cleaned === "—" || cleaned === "null" || cleaned === "undefined" || cleaned === "NULL" || cleaned === "UNDEFINED") {
       return 0;
     }
 
@@ -352,7 +497,11 @@ export class BankExcelParser {
     }
 
     const parsed = parseFloat(cleaned);
-    return isNaN(parsed) ? 0 : Math.abs(parsed);
+    if (isNaN(parsed)) {
+      return 0;
+    }
+    
+    return Math.abs(parsed);
   }
 
   static extractPartyName(description: string): string {
@@ -437,6 +586,21 @@ export class BankExcelParser {
       return "Interest Income";
     }
     return "Other Credit";
+  }
+
+  static autoCategorizeDebit(description: string): "Purchase" | "Payment Made" | "Expense" | "Other Debit" {
+    const desc = description.toLowerCase();
+
+    if (desc.includes("purchase") || desc.includes("buy")) {
+      return "Purchase";
+    }
+    if (desc.includes("payment") || desc.includes("paid")) {
+      return "Payment Made";
+    }
+    if (desc.includes("expense") || desc.includes("charge") || desc.includes("fee")) {
+      return "Expense";
+    }
+    return "Other Debit";
   }
 }
 

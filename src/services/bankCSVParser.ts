@@ -21,9 +21,10 @@ export class BankCSVParser {
   /**
    * Parse bank CSV with specific format:
    * Date, Narration, Chq./Ref.No., Value Dt, Withdrawal Amt., Deposit Amt., Closing Balance
-   * Only processes rows where Deposit Amt. > 0
+   * @param file - The CSV file to parse
+   * @param transactionType - 'credit', 'debit', or 'both' to filter transactions
    */
-  static parseFile(file: File): Promise<Transaction[]> {
+  static parseFile(file: File, transactionType: 'credit' | 'debit' | 'both' = 'credit'): Promise<Transaction[]> {
     return new Promise((resolve, reject) => {
       // First, read the file as text to find the header row
       const reader = new FileReader();
@@ -126,7 +127,7 @@ export class BankCSVParser {
                 return;
               }
 
-              const transactions = this.parseRows(validRows as BankCSVRow[]);
+              const transactions = this.parseRows(validRows as BankCSVRow[], transactionType);
 
               if (transactions.length === 0) {
                 // Provide more helpful error message
@@ -173,7 +174,7 @@ export class BankCSVParser {
     });
   }
 
-  static parseRows(rows: BankCSVRow[]): Transaction[] {
+  static parseRows(rows: BankCSVRow[], transactionType: 'credit' | 'debit' | 'both' = 'credit'): Transaction[] {
     const transactions: Transaction[] = [];
 
     // Debug: Log first row to see structure
@@ -184,7 +185,7 @@ export class BankCSVParser {
 
     rows.forEach((row, index) => {
       try {
-        const transaction = this.parseRow(row, index);
+        const transaction = this.parseRow(row, index, transactionType);
         if (transaction) {
           transactions.push(transaction);
         }
@@ -193,11 +194,11 @@ export class BankCSVParser {
       }
     });
 
-    console.log(`Parsed ${transactions.length} transactions from ${rows.length} rows`);
+    console.log(`Parsed ${transactions.length} transactions from ${rows.length} rows (filter: ${transactionType})`);
     return transactions;
   }
 
-  static parseRow(row: BankCSVRow, index: number): Transaction | null {
+  static parseRow(row: BankCSVRow, index: number, transactionType: 'credit' | 'debit' | 'both' = 'credit'): Transaction | null {
     // Use flexible column matching (case-insensitive, handles variations)
     const rowKeys = Object.keys(row);
     const rowLower = Object.fromEntries(
@@ -281,16 +282,22 @@ export class BankCSVParser {
       return null;
     }
 
-    // Find deposit amount column (flexible matching)
+    // Find deposit/credit amount column (flexible matching)
     let depositAmtStr = "";
     for (const key of rowKeys) {
       const keyLower = key.toLowerCase().trim();
       if (
-        (keyLower.includes("deposit") && keyLower.includes("amt")) ||
-        (keyLower.includes("deposit") && keyLower.includes("amount")) ||
-        (keyLower === "deposit amt.") ||
-        (keyLower === "deposit amt") ||
-        (keyLower === "deposit amount")
+        (keyLower.includes("deposit") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
+        keyLower === "deposit amt." ||
+        keyLower === "deposit amt" ||
+        keyLower === "deposit amount" ||
+        keyLower === "deposit" ||
+        (keyLower.includes("credit") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
+        keyLower === "credit amt." ||
+        keyLower === "credit amt" ||
+        keyLower === "credit amount" ||
+        keyLower === "credit" ||
+        keyLower === "cr"
       ) {
         depositAmtStr = String(row[key] || "0");
         break;
@@ -301,20 +308,90 @@ export class BankCSVParser {
         rowLower["deposit amt."] ||
         rowLower["deposit amt"] ||
         rowLower["deposit amount"] ||
+        rowLower["deposit"] ||
+        rowLower["credit amt."] ||
+        rowLower["credit amt"] ||
+        rowLower["credit amount"] ||
+        rowLower["credit"] ||
+        rowLower["cr"] ||
         "0"
       );
     }
 
     const depositAmount = this.parseAmount(depositAmtStr);
 
-    // Debug first few rows
-    if (index < 3) {
-      console.log(`Row ${index + 1}: Deposit amount found: "${depositAmtStr}" = ${depositAmount}`);
+    // Find withdrawal/debit amount column (flexible matching)
+    let withdrawalAmtStr = "";
+    for (const key of rowKeys) {
+      const keyLower = key.toLowerCase().trim();
+      if (
+        (keyLower.includes("withdrawal") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
+        keyLower === "withdrawal amt." ||
+        keyLower === "withdrawal amt" ||
+        keyLower === "withdrawal amount" ||
+        keyLower === "withdrawal" ||
+        (keyLower.includes("debit") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
+        keyLower === "debit amt." ||
+        keyLower === "debit amt" ||
+        keyLower === "debit amount" ||
+        keyLower === "debit" ||
+        keyLower === "dr"
+      ) {
+        withdrawalAmtStr = String(row[key] || "0");
+        break;
+      }
+    }
+    if (!withdrawalAmtStr) {
+      withdrawalAmtStr = String(
+        rowLower["withdrawal amt."] ||
+        rowLower["withdrawal amt"] ||
+        rowLower["withdrawal amount"] ||
+        rowLower["withdrawal"] ||
+        rowLower["debit amt."] ||
+        rowLower["debit amt"] ||
+        rowLower["debit amount"] ||
+        rowLower["debit"] ||
+        rowLower["dr"] ||
+        "0"
+      );
     }
 
-    // Only process deposits > 0
-    if (depositAmount <= 0) {
-      return null; // Skip withdrawals and zero amounts
+    const withdrawalAmount = this.parseAmount(withdrawalAmtStr);
+
+    // Debug first few rows
+    if (index < 3) {
+      console.log(`Row ${index + 1}: Deposit amount: "${depositAmtStr}" = ${depositAmount}, Withdrawal amount: "${withdrawalAmtStr}" = ${withdrawalAmount}`);
+    }
+
+    // Determine transaction type and amount based on filter
+    let amount = 0;
+    let type: 'credit' | 'debit' = 'credit';
+    
+    if (depositAmount > 0 && withdrawalAmount > 0) {
+      // Both have values - use the larger one
+      if (depositAmount >= withdrawalAmount) {
+        amount = depositAmount;
+        type = 'credit';
+      } else {
+        amount = withdrawalAmount;
+        type = 'debit';
+      }
+    } else if (depositAmount > 0) {
+      amount = depositAmount;
+      type = 'credit';
+    } else if (withdrawalAmount > 0) {
+      amount = withdrawalAmount;
+      type = 'debit';
+    } else {
+      return null; // Skip rows with no amount
+    }
+
+    // Filter based on transactionType parameter
+    if (transactionType === 'credit' && type !== 'credit') {
+      return null;
+    }
+    if (transactionType === 'debit' && type !== 'debit') {
+      return null;
     }
 
     // Narration is already found above (used for summary row check)
@@ -345,15 +422,17 @@ export class BankCSVParser {
     // Leave party name blank - user will enter it manually and system will learn
     const partyName = "";
 
-    // Auto-categorize
-    const category = this.autoCategorize(narration);
+    // Auto-categorize based on transaction type
+    const category = type === 'credit' 
+      ? this.autoCategorize(narration)
+      : this.autoCategorizeDebit(narration);
 
     const transaction: Transaction = {
       id: generateId(),
       date: date.toISOString().split("T")[0],
-      amount: depositAmount,
+      amount: amount,
       description: narration,
-      type: "credit",
+      type: type,
       category: category,
       partyName: partyName,
       referenceNumber: referenceNumber || undefined,
@@ -513,6 +592,21 @@ export class BankCSVParser {
       return "Interest Income";
     }
     return "Other Credit";
+  }
+
+  static autoCategorizeDebit(description: string): "Purchase" | "Payment Made" | "Expense" | "Other Debit" {
+    const desc = description.toLowerCase();
+
+    if (desc.includes("purchase") || desc.includes("buy")) {
+      return "Purchase";
+    }
+    if (desc.includes("payment") || desc.includes("paid")) {
+      return "Payment Made";
+    }
+    if (desc.includes("expense") || desc.includes("charge") || desc.includes("fee")) {
+      return "Expense";
+    }
+    return "Other Debit";
   }
 }
 
