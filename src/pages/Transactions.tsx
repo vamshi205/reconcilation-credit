@@ -1340,7 +1340,7 @@ export function Transactions() {
     });
   };
 
-  // Find similar transactions from completed queue based on keywords
+  // Find similar transactions from completed queue - only show transactions completed with this exact party name
   const findSimilarTransactions = (transaction: Transaction, suggestedName: string): Transaction[] => {
     // Get all completed transactions
     const completedTransactions = transactions.filter((t) => {
@@ -1354,46 +1354,25 @@ export function Transactions() {
       return isCompleted && !isHold && !isSelfTransfer;
     });
 
-    // Extract keywords from the current transaction's narration
-    const narration = transaction.description?.toLowerCase() || '';
-    const narrationWords = narration
-      .split(/\s+/)
-      .filter(w => w.length > 3) // Only words longer than 3 characters
-      .filter(w => !['neft', 'imps', 'rtgs', 'upi', 'ft', 'cr', 'dr', 'chq', 'sbin', 'sbinn'].includes(w.toLowerCase())); // Exclude common transaction terms
-
-    // Find transactions where narration contains similar keywords
+    // Find transactions where party name exactly matches the suggested name
+    const suggestedNameLower = suggestedName.toLowerCase().trim();
     const similar = completedTransactions.filter((t) => {
       if (t.id === transaction.id) return false; // Exclude current transaction
       
-      const tNarration = t.description?.toLowerCase() || '';
-      const tPartyName = t.partyName?.toLowerCase() || '';
+      const tPartyName = (t.partyName || '').toLowerCase().trim();
       
-      // Check if party name matches suggested name
-      if (tPartyName.includes(suggestedName.toLowerCase()) || suggestedName.toLowerCase().includes(tPartyName)) {
-        return true;
-      }
-      
-      // Check if narration has matching keywords
-      const matchingKeywords = narrationWords.filter(keyword => 
-        tNarration.includes(keyword) || tPartyName.includes(keyword)
-      );
-      
-      // Return true if at least 2 keywords match
-      return matchingKeywords.length >= 2;
+      // Only show transactions where party name matches the suggested name
+      return tPartyName === suggestedNameLower;
     });
 
-    // Sort by relevance (more matching keywords first) and limit to 5
+    // Sort by date (most recent first) and limit to 5
     return similar
-      .map(t => {
-        const tNarration = t.description?.toLowerCase() || '';
-        const matchingKeywords = narrationWords.filter(keyword => 
-          tNarration.includes(keyword)
-        );
-        return { transaction: t, score: matchingKeywords.length };
+      .sort((a, b) => {
+        const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : new Date(a.date).getTime();
+        const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : new Date(b.date).getTime();
+        return dateB - dateA; // Most recent first
       })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
-      .map(item => item.transaction);
+      .slice(0, 5);
   };
 
   // Handle show similar transactions
@@ -2794,29 +2773,39 @@ export function Transactions() {
                                                 <div key={idx} className="flex items-center gap-1 relative">
                                                   <button
                                                     type="button"
-                                                    onClick={() => handleApplySuggestion(transaction.id, transaction.partyName, suggested)}
+                                                    onClick={(e) => {
+                                                      // If clicking on Info icon, show similar transactions
+                                                      const target = e.target as HTMLElement;
+                                                      if (target.closest('.info-icon-button') || target.closest('svg')) {
+                                                        e.stopPropagation();
+                                                        handleShowSimilarTransactions(transaction.id, suggested);
+                                                      } else {
+                                                        // Otherwise, apply the suggestion
+                                                        handleApplySuggestion(transaction.id, transaction.partyName, suggested);
+                                                      }
+                                                    }}
                                                     className="flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
                                                     title={`Suggested: ${suggested}`}
                                                   >
                                                     <Sparkles className="h-3 w-3" />
                                                     → {suggested}
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      handleShowSimilarTransactions(transaction.id, suggested);
-                                                    }}
-                                                    className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors flex-shrink-0 border border-blue-200 hover:border-blue-300"
-                                                    title="Why this suggestion? Click to see similar transactions"
-                                                  >
-                                                    <Info className="h-4 w-4" />
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleShowSimilarTransactions(transaction.id, suggested);
+                                                      }}
+                                                      className="info-icon-button p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-200 rounded transition-colors flex-shrink-0 ml-1"
+                                                      title="Why this suggestion? Click to see transactions completed with this party name"
+                                                    >
+                                                      <Info className="h-3 w-3" />
+                                                    </button>
                                                   </button>
                                                   {showSimilarTransactions?.transactionId === transaction.id && 
                                                    showSimilarTransactions?.suggestedName === suggested && (
                                                     <div className="similar-transactions-tooltip absolute right-0 top-full mt-1 z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-3 min-w-[300px] max-w-[400px] max-h-[300px] overflow-y-auto">
                                                       <div className="flex items-center justify-between mb-2">
-                                                        <h4 className="text-xs font-semibold text-gray-700">Similar Transactions</h4>
+                                                        <h4 className="text-xs font-semibold text-gray-700">Transactions Completed with: {suggested}</h4>
                                                         <button
                                                           onClick={(e) => {
                                                             e.stopPropagation();
@@ -3336,28 +3325,38 @@ export function Transactions() {
                         <Button
                           type="button"
                           variant="secondary"
-                          onClick={() => setModalPartyName(suggestion)}
+                          onClick={(e) => {
+                            // If clicking on Info icon, show similar transactions
+                            const target = e.target as HTMLElement;
+                            if (target.closest('.info-icon-button') || target.closest('svg')) {
+                              e.stopPropagation();
+                              handleShowModalSimilarTransactions(suggestion);
+                            } else {
+                              // Otherwise, use the suggestion
+                              setModalPartyName(suggestion);
+                            }
+                          }}
                           className="flex-shrink-0"
                           title={`Use suggested: ${suggestion}`}
                         >
                           <Sparkles className="h-4 w-4 mr-2" />
                           Use: {suggestion}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleShowModalSimilarTransactions(suggestion);
+                            }}
+                            className="info-icon-button p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-200 rounded transition-colors flex-shrink-0 ml-1"
+                            title="Why this suggestion? Click to see transactions completed with this party name"
+                          >
+                            <Info className="h-3 w-3" />
+                          </button>
                         </Button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleShowModalSimilarTransactions(suggestion);
-                          }}
-                          className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors flex-shrink-0 border border-blue-200 hover:border-blue-300"
-                          title="Why this suggestion? Click to see similar transactions"
-                        >
-                          <Info className="h-4 w-4" />
-                        </button>
                         {showModalSimilarTransactions?.suggestedName === suggestion && (
                           <div className="modal-similar-transactions-tooltip absolute right-0 top-full mt-1 z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-3 min-w-[300px] max-w-[400px] max-h-[300px] overflow-y-auto">
                             <div className="flex items-center justify-between mb-2">
-                              <h4 className="text-xs font-semibold text-gray-700">Similar Transactions</h4>
+                              <h4 className="text-xs font-semibold text-gray-700">Transactions Completed with: {suggestion}</h4>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
