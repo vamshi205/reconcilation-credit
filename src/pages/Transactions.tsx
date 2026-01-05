@@ -71,6 +71,8 @@ export function Transactions() {
   const [editingPartyValue, setEditingPartyValue] = useState<string>("");
   const [showSimilarTransactions, setShowSimilarTransactions] = useState<{ transactionId: string; suggestedName: string } | null>(null);
   const [similarTransactions, setSimilarTransactions] = useState<Transaction[]>([]);
+  const [showModalSimilarTransactions, setShowModalSimilarTransactions] = useState<{ suggestedName: string } | null>(null);
+  const [modalSimilarTransactions, setModalSimilarTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [partySuggestions, setPartySuggestions] = useState<Record<string, string[] | null>>({});
@@ -137,15 +139,21 @@ export function Transactions() {
           setShowSimilarTransactions(null);
         }
       }
+      if (showModalSimilarTransactions) {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.modal-similar-transactions-tooltip')) {
+          setShowModalSimilarTransactions(null);
+        }
+      }
     };
 
-    if (showSimilarTransactions) {
+    if (showSimilarTransactions || showModalSimilarTransactions) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
       };
     }
-  }, [showSimilarTransactions]);
+  }, [showSimilarTransactions, showModalSimilarTransactions]);
   
   // Resizing state
   const [resizingColumn, setResizingColumn] = useState<string | null>(null);
@@ -1398,6 +1406,15 @@ export function Transactions() {
     setShowSimilarTransactions({ transactionId, suggestedName });
   };
 
+  // Handle show similar transactions in modal
+  const handleShowModalSimilarTransactions = (suggestedName: string) => {
+    if (!editingTransaction) return;
+    
+    const similar = findSimilarTransactions(editingTransaction, suggestedName);
+    setModalSimilarTransactions(similar);
+    setShowModalSimilarTransactions({ suggestedName });
+  };
+
   // Handle apply suggestion
   const handleApplySuggestion = async (transactionId: string, originalName: string, suggestedName: string) => {
     const transaction = transactions.find((t) => t.id === transactionId);
@@ -1516,6 +1533,8 @@ export function Transactions() {
     setModalSuggestions([]);
     setIsSavingToSheets(false);
     setDuplicateError(null);
+    setShowModalSimilarTransactions(null);
+    setModalSimilarTransactions([]);
     setSaveSuccess(false);
   };
 
@@ -3313,17 +3332,58 @@ export function Transactions() {
                     .filter(s => s !== modalPartyName)
                     .slice(0, 3)
                     .map((suggestion, idx) => (
-                      <Button
-                        key={idx}
-                        type="button"
-                        variant="secondary"
-                        onClick={() => setModalPartyName(suggestion)}
-                        className="flex-shrink-0"
-                        title={`Use suggested: ${suggestion}`}
-                      >
-                        <Sparkles className="h-4 w-4 mr-2" />
-                        Use: {suggestion}
-                      </Button>
+                      <div key={idx} className="flex items-center gap-1 relative">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => setModalPartyName(suggestion)}
+                          className="flex-shrink-0"
+                          title={`Use suggested: ${suggestion}`}
+                        >
+                          <Sparkles className="h-4 w-4 mr-2" />
+                          Use: {suggestion}
+                        </Button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleShowModalSimilarTransactions(suggestion);
+                          }}
+                          className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
+                          title="Why this suggestion?"
+                        >
+                          <Info className="h-4 w-4" />
+                        </button>
+                        {showModalSimilarTransactions?.suggestedName === suggestion && (
+                          <div className="modal-similar-transactions-tooltip absolute right-0 top-full mt-1 z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-3 min-w-[300px] max-w-[400px] max-h-[300px] overflow-y-auto">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="text-xs font-semibold text-gray-700">Similar Transactions</h4>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowModalSimilarTransactions(null);
+                                }}
+                                className="text-gray-400 hover:text-gray-600"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                            {modalSimilarTransactions.length > 0 ? (
+                              <div className="space-y-2">
+                                {modalSimilarTransactions.map((t) => (
+                                  <div key={t.id} className="text-xs border-b border-gray-200 pb-2 last:border-0">
+                                    <div className="font-medium text-gray-900">{formatDate(t.date)}</div>
+                                    <div className="text-gray-700 mt-0.5">₹{t.amount.toLocaleString()}</div>
+                                    <div className="text-gray-600 mt-0.5 line-clamp-2">{t.description || '-'}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-xs text-gray-500">No similar transactions found</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     ))}
                 </div>
               )}
