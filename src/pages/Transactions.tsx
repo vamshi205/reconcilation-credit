@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card"
 import { Input } from "../components/ui/Input";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Button } from "../components/ui/Button";
-import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer, ArrowRightLeft, LogOut } from "lucide-react";
+import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer, ArrowRightLeft, LogOut, Info } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Label } from "../components/ui/Label";
 import { Modal } from "../components/ui/Modal";
@@ -69,6 +69,8 @@ export function Transactions() {
   // State for editing party names
   const [editingPartyName, setEditingPartyName] = useState<string | null>(null);
   const [editingPartyValue, setEditingPartyValue] = useState<string>("");
+  const [showSimilarTransactions, setShowSimilarTransactions] = useState<{ transactionId: string; suggestedName: string } | null>(null);
+  const [similarTransactions, setSimilarTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [partySuggestions, setPartySuggestions] = useState<Record<string, string[] | null>>({});
@@ -125,6 +127,25 @@ export function Transactions() {
     const saved = localStorage.getItem(`transactionColumnWidths_${view}`);
     setColumnWidths(saved ? JSON.parse(saved) : {});
   }, [view]);
+
+  // Close similar transactions tooltip when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showSimilarTransactions) {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.similar-transactions-tooltip')) {
+          setShowSimilarTransactions(null);
+        }
+      }
+    };
+
+    if (showSimilarTransactions) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showSimilarTransactions]);
   
   // Resizing state
   const [resizingColumn, setResizingColumn] = useState<string | null>(null);
@@ -1309,6 +1330,72 @@ export function Transactions() {
         setConfirmationModal(null);
       }
     });
+  };
+
+  // Find similar transactions from completed queue based on keywords
+  const findSimilarTransactions = (transaction: Transaction, suggestedName: string): Transaction[] => {
+    // Get all completed transactions
+    const completedTransactions = transactions.filter((t) => {
+      const isChecked = Boolean(t.added_to_vyapar || t.inVyapar);
+      const storageRef = t.vyapar_reference_number ? String(t.vyapar_reference_number).trim() : '';
+      const hasReference = Boolean(storageRef);
+      const hasPartyName = Boolean(t.partyName && t.partyName.trim() !== '');
+      const isCompleted = isChecked && hasReference && hasPartyName;
+      const isHold = t.hold === true;
+      const isSelfTransfer = t.selfTransfer === true;
+      return isCompleted && !isHold && !isSelfTransfer;
+    });
+
+    // Extract keywords from the current transaction's narration
+    const narration = transaction.description?.toLowerCase() || '';
+    const narrationWords = narration
+      .split(/\s+/)
+      .filter(w => w.length > 3) // Only words longer than 3 characters
+      .filter(w => !['neft', 'imps', 'rtgs', 'upi', 'ft', 'cr', 'dr', 'chq', 'sbin', 'sbinn'].includes(w.toLowerCase())); // Exclude common transaction terms
+
+    // Find transactions where narration contains similar keywords
+    const similar = completedTransactions.filter((t) => {
+      if (t.id === transaction.id) return false; // Exclude current transaction
+      
+      const tNarration = t.description?.toLowerCase() || '';
+      const tPartyName = t.partyName?.toLowerCase() || '';
+      
+      // Check if party name matches suggested name
+      if (tPartyName.includes(suggestedName.toLowerCase()) || suggestedName.toLowerCase().includes(tPartyName)) {
+        return true;
+      }
+      
+      // Check if narration has matching keywords
+      const matchingKeywords = narrationWords.filter(keyword => 
+        tNarration.includes(keyword) || tPartyName.includes(keyword)
+      );
+      
+      // Return true if at least 2 keywords match
+      return matchingKeywords.length >= 2;
+    });
+
+    // Sort by relevance (more matching keywords first) and limit to 5
+    return similar
+      .map(t => {
+        const tNarration = t.description?.toLowerCase() || '';
+        const matchingKeywords = narrationWords.filter(keyword => 
+          tNarration.includes(keyword)
+        );
+        return { transaction: t, score: matchingKeywords.length };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map(item => item.transaction);
+  };
+
+  // Handle show similar transactions
+  const handleShowSimilarTransactions = (transactionId: string, suggestedName: string) => {
+    const transaction = transactions.find(t => t.id === transactionId);
+    if (!transaction) return;
+    
+    const similar = findSimilarTransactions(transaction, suggestedName);
+    setSimilarTransactions(similar);
+    setShowSimilarTransactions({ transactionId, suggestedName });
   };
 
   // Handle apply suggestion
@@ -2685,16 +2772,58 @@ export function Transactions() {
                                           return (
                                             <div className="flex items-center gap-1 flex-wrap">
                                               {differentSuggestions.slice(0, 3).map((suggested, idx) => (
-                                                <button
-                                                  key={idx}
-                                                  type="button"
-                                                  onClick={() => handleApplySuggestion(transaction.id, transaction.partyName, suggested)}
-                                                  className="flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-                                                  title={`Suggested: ${suggested}`}
-                                                >
-                                                  <Sparkles className="h-3 w-3" />
-                                                  → {suggested}
-                                                </button>
+                                                <div key={idx} className="flex items-center gap-1 relative">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleApplySuggestion(transaction.id, transaction.partyName, suggested)}
+                                                    className="flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                                                    title={`Suggested: ${suggested}`}
+                                                  >
+                                                    <Sparkles className="h-3 w-3" />
+                                                    → {suggested}
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleShowSimilarTransactions(transaction.id, suggested);
+                                                    }}
+                                                    className="p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
+                                                    title="Why this suggestion?"
+                                                  >
+                                                    <Info className="h-3 w-3" />
+                                                  </button>
+                                                  {showSimilarTransactions?.transactionId === transaction.id && 
+                                                   showSimilarTransactions?.suggestedName === suggested && (
+                                                    <div className="similar-transactions-tooltip absolute right-0 top-full mt-1 z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-3 min-w-[300px] max-w-[400px] max-h-[300px] overflow-y-auto">
+                                                      <div className="flex items-center justify-between mb-2">
+                                                        <h4 className="text-xs font-semibold text-gray-700">Similar Transactions</h4>
+                                                        <button
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setShowSimilarTransactions(null);
+                                                          }}
+                                                          className="text-gray-400 hover:text-gray-600"
+                                                        >
+                                                          <X className="h-3 w-3" />
+                                                        </button>
+                                                      </div>
+                                                      {similarTransactions.length > 0 ? (
+                                                        <div className="space-y-2">
+                                                          {similarTransactions.map((t) => (
+                                                            <div key={t.id} className="text-xs border-b border-gray-200 pb-2 last:border-0">
+                                                              <div className="font-medium text-gray-900">{formatDate(t.date)}</div>
+                                                              <div className="text-gray-700 mt-0.5">₹{t.amount.toLocaleString()}</div>
+                                                              <div className="text-gray-600 mt-0.5 line-clamp-2">{t.description || '-'}</div>
+                                                            </div>
+                                                          ))}
+                                                        </div>
+                                                      ) : (
+                                                        <div className="text-xs text-gray-500">No similar transactions found</div>
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                </div>
                                               ))}
                                             </div>
                                           );
