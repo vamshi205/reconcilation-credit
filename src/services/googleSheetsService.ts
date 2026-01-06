@@ -139,12 +139,16 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
     // Format transaction data as row array
     const rowData = formatTransactionAsRow(transaction);
 
-    console.log('Updating transaction in Google Sheets:', { id: transaction.id, vyaparRef: transaction.vyapar_reference_number });
+    // Determine which sheet to update based on transaction type
+    const sheetName = transaction.type === 'debit' ? 'DebitTransactions' : 'Transactions';
+
+    console.log(`Updating ${transaction.type} transaction in Google Sheets (${sheetName}):`, { id: transaction.id, vyaparRef: transaction.vyapar_reference_number });
 
     // Use fetch API for better error handling and response checking
     const formData = new URLSearchParams();
     formData.append('action', 'updateRow');
     formData.append('transactionId', transaction.id);
+    formData.append('sheetName', sheetName); // Specify which sheet to update
     formData.append('data', JSON.stringify(rowData));
 
     // Try using fetch first (more reliable)
@@ -207,6 +211,7 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
         const payload = {
           action: 'updateRow',
           transactionId: transaction.id,
+          sheetName: sheetName, // Specify which sheet to update
           data: JSON.stringify(rowData),
         };
 
@@ -314,7 +319,10 @@ export async function saveTransactionToSheets(transaction: Transaction): Promise
     // Format transaction data as row array
     const rowData = formatTransactionAsRow(transaction);
 
-    console.log('Sending transaction to Google Sheets:', { rowCount: rowData.length });
+    // Determine which sheet to use based on transaction type
+    const sheetName = transaction.type === 'debit' ? 'DebitTransactions' : 'Transactions';
+
+    console.log(`Sending ${transaction.type} transaction to Google Sheets (${sheetName}):`, { rowCount: rowData.length });
 
     // Google Apps Script - use URL-encoded form data which works better
     // Create form with proper encoding
@@ -335,6 +343,7 @@ export async function saveTransactionToSheets(transaction: Transaction): Promise
       // Google Apps Script receives this as e.parameter.fieldName
       const payload = {
         action: 'appendRow',
+        sheetName: sheetName, // Specify which sheet to write to
         data: JSON.stringify(rowData), // Send data array as JSON string
       };
 
@@ -436,8 +445,9 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
       return true;
     });
     
-    if (uniqueTransactions.length < transactions.length) {
-      const duplicatesCount = transactions.length - uniqueTransactions.length;
+    // Calculate duplicates count (initialize to 0 if no duplicates)
+    const duplicatesCount = transactions.length - uniqueTransactions.length;
+    if (duplicatesCount > 0) {
       console.log(`⚠️ Removed ${duplicatesCount} duplicate transaction(s) before saving`);
     }
     
@@ -446,15 +456,76 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
       return { success: 0, failed: transactions.length };
     }
 
-    // Format all unique transactions as rows
-    const allRows = uniqueTransactions.map(transaction => formatTransactionAsRow(transaction));
+    // Separate credit and debit transactions
+    const creditTransactions = uniqueTransactions.filter(t => t.type === 'credit' || !t.type);
+    const debitTransactions = uniqueTransactions.filter(t => t.type === 'debit');
     
-    console.log(`Sending batch of ${allRows.length} transactions...`);
+    console.log(`Separated transactions: ${creditTransactions.length} credit, ${debitTransactions.length} debit`);
 
-    // Send all transactions in one POST request
+    // Format transactions as rows
+    const creditRows = creditTransactions.map(transaction => formatTransactionAsRow(transaction));
+    const debitRows = debitTransactions.map(transaction => formatTransactionAsRow(transaction));
+    
+    let successCount = 0;
+    let failedCount = duplicatesCount;
+
+    // Send credit transactions if any
+    if (creditRows.length > 0) {
+      console.log(`Sending batch of ${creditRows.length} credit transactions...`);
+      try {
+        await sendBatchToSheets(creditRows, 'Transactions');
+        successCount += creditRows.length;
+      } catch (error) {
+        console.error('Error sending credit transactions:', error);
+        failedCount += creditRows.length;
+      }
+    }
+
+    // Send debit transactions if any
+    if (debitRows.length > 0) {
+      console.log(`Sending batch of ${debitRows.length} debit transactions to DebitTransactions sheet...`);
+      try {
+        await sendBatchToSheets(debitRows, 'DebitTransactions');
+        successCount += debitRows.length;
+        console.log(`✓ Successfully sent ${debitRows.length} debit transactions to DebitTransactions sheet`);
+      } catch (error) {
+        console.error('❌ Error sending debit transactions:', error);
+        console.error('Error details:', {
+          error,
+          rowCount: debitRows.length,
+          firstRow: debitRows[0],
+          sheetName: 'DebitTransactions'
+        });
+        failedCount += debitRows.length;
+      }
+    }
+
+    return { success: successCount, failed: failedCount };
+  } catch (error) {
+    console.error('Error saving batch to Google Sheets:', error);
+    return { success: 0, failed: transactions.length };
+  }
+}
+
+/**
+ * Helper function to send batch of rows to a specific sheet
+ */
+async function sendBatchToSheets(rows: (string | number)[][], sheetName: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.trim() === '') {
+      reject(new Error('Google Apps Script URL not configured'));
+      return;
+    }
+
+    if (rows.length === 0) {
+      console.log(`No rows to send to ${sheetName} sheet`);
+      resolve();
+      return;
+    }
+
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
-    iframe.name = 'google-sheets-iframe-batch-' + Date.now();
+    iframe.name = 'google-sheets-iframe-batch-' + Date.now() + '-' + sheetName;
     document.body.appendChild(iframe);
 
     const form = document.createElement('form');
@@ -464,13 +535,19 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
     form.enctype = 'application/x-www-form-urlencoded';
     form.style.display = 'none';
 
-    // Send batch data
+    // Send batch data with sheet name
     const payload = {
       action: 'appendRows',
-      data: JSON.stringify(allRows), // Send all rows as JSON string
+      sheetName: sheetName, // Specify which sheet to write to
+      data: JSON.stringify(rows), // Send all rows as JSON string
     };
 
-    console.log('Batch payload:', { action: payload.action, rowCount: allRows.length });
+    console.log(`📤 Sending batch to ${sheetName} sheet:`, { 
+      action: payload.action, 
+      rowCount: rows.length,
+      sheetName: sheetName,
+      firstRowSample: rows[0]?.slice(0, 5) // Show first 5 columns of first row
+    });
 
     // Add each field as a form input
     Object.keys(payload).forEach(key => {
@@ -487,27 +564,23 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
     form.submit();
     
     // Clean up after a delay
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        try {
-          if (document.body.contains(form)) {
-            document.body.removeChild(form);
-          }
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-        } catch (e) {
-          // Already removed
+    setTimeout(() => {
+      try {
+        if (document.body.contains(form)) {
+          document.body.removeChild(form);
         }
-        console.log(`✓ Batch of ${uniqueTransactions.length} unique transactions sent to Google Sheets`);
-        const duplicatesCount = transactions.length - uniqueTransactions.length;
-        resolve({ success: uniqueTransactions.length, failed: duplicatesCount });
-      }, 3000); // Give it a bit more time for batch processing
-    });
-  } catch (error) {
-    console.error('Error saving batch to Google Sheets:', error);
-    return { success: 0, failed: transactions.length };
-  }
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      } catch (e) {
+        // Already removed
+      }
+      console.log(`✓ Batch of ${rows.length} transactions sent to ${sheetName} sheet (check Google Sheets to verify)`);
+      // Note: We can't verify the response with iframe method, so we just resolve
+      // The actual success/failure will be visible in Google Sheets
+      resolve();
+    }, 3000); // Give it a bit more time for batch processing
+  });
 }
 
 /**
@@ -967,12 +1040,26 @@ export async function fetchPartyMappingsFromSheets(): Promise<PartyNameMapping[]
 
     const responseText = await response.text();
     
+    // Check if response is HTML (error page) instead of JSON
+    if (responseText.trim().startsWith('<') || responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+      console.error('Google Apps Script returned HTML instead of JSON. Response:', responseText.substring(0, 200));
+      return [];
+    }
+    
     if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
       console.error('Google Apps Script requires authorization.');
       return [];
     }
 
-    const result = JSON.parse(responseText);
+    // Try to parse JSON, but handle errors gracefully
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Failed to parse JSON response. Response text:', responseText.substring(0, 500));
+      console.error('Parse error:', parseError);
+      return [];
+    }
     
     if (result.success && result.data) {
       const mappings = result.data.map((row: any[]) => ({
@@ -1010,12 +1097,26 @@ export async function fetchPartiesFromSheets(): Promise<string[]> {
 
     const responseText = await response.text();
     
+    // Check if response is HTML (error page) instead of JSON
+    if (responseText.trim().startsWith('<') || responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+      console.error('Google Apps Script returned HTML instead of JSON. Response:', responseText.substring(0, 200));
+      return [];
+    }
+    
     if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
       console.error('Google Apps Script requires authorization.');
       return [];
     }
 
-    const result = JSON.parse(responseText);
+    // Try to parse JSON, but handle errors gracefully
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Failed to parse JSON response. Response text:', responseText.substring(0, 500));
+      console.error('Parse error:', parseError);
+      return [];
+    }
     
     if (result.success && result.data) {
       // Extract party names from rows (assuming first column contains party name)
@@ -1048,12 +1149,26 @@ export async function fetchSuppliersFromSheets(): Promise<string[]> {
 
     const responseText = await response.text();
     
+    // Check if response is HTML (error page) instead of JSON
+    if (responseText.trim().startsWith('<') || responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+      console.error('Google Apps Script returned HTML instead of JSON. Response:', responseText.substring(0, 200));
+      return [];
+    }
+    
     if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
       console.error('Google Apps Script requires authorization.');
       return [];
     }
 
-    const result = JSON.parse(responseText);
+    // Try to parse JSON, but handle errors gracefully
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Failed to parse JSON response. Response text:', responseText.substring(0, 500));
+      console.error('Parse error:', parseError);
+      return [];
+    }
     
     if (result.success && result.data) {
       // Extract supplier names from rows (assuming first column contains supplier name)
@@ -1331,12 +1446,26 @@ export async function fetchSupplierMappingsFromSheets(): Promise<SupplierNameMap
 
     const responseText = await response.text();
     
+    // Check if response is HTML (error page) instead of JSON
+    if (responseText.trim().startsWith('<') || responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+      console.error('Google Apps Script returned HTML instead of JSON. Response:', responseText.substring(0, 200));
+      return [];
+    }
+    
     if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
       console.error('Google Apps Script requires authorization.');
       return [];
     }
 
-    const result = JSON.parse(responseText);
+    // Try to parse JSON, but handle errors gracefully
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Failed to parse JSON response. Response text:', responseText.substring(0, 500));
+      console.error('Parse error:', parseError);
+      return [];
+    }
     
     if (result.success && result.data) {
       const mappings = result.data.map((row: any[]) => ({

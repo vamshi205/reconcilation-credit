@@ -1,27 +1,11 @@
-# Google Sheets Integration Setup Guide
+# Updated Google Apps Script - Unified Approach
 
-This guide will help you set up automatic writing of transactions to Google Sheets when you upload CSV files.
-
-## Step 1: Create Google Apps Script
-
-1. Open your Google Sheet (or create a new one)
-2. Go to **Extensions** → **Apps Script**
-3. Delete any existing code
-4. Copy and paste this code:
+Copy and paste this updated script into your Google Apps Script editor. This version uses the `sheetName` parameter to route transactions to the correct sheet, matching the frontend implementation.
 
 ```javascript
 function doPost(e) {
   try {
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    // Default sheet (will be overridden by sheetName parameter if provided)
-    let sheet = spreadsheet.getSheetByName('Transactions');
-    if (!sheet) {
-      sheet = spreadsheet.getActiveSheet();
-      // If active sheet is not Transactions, create it
-      if (sheet.getName() !== 'Transactions') {
-        sheet = spreadsheet.insertSheet('Transactions');
-      }
-    }
     
     // Log received parameters for debugging
     Logger.log('Received parameters: ' + JSON.stringify(e.parameter));
@@ -52,45 +36,13 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     
-    // Add headers if sheet is empty
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        'Transaction ID',
-        'Date',
-        'Narration',
-        'Bank Ref No.',
-        'Amount',
-        'Party Name',
-        'Category',
-        'Type',
-        'Added to Vyapar',
-        'Vyapar Ref No.',
-        'Hold',
-        'Notes',
-        'Created At',
-        'Updated At'
-      ]);
-    }
-    
-    if (action === 'appendRow') {
-      // Single row append
-      // Check if sheetName parameter is provided, otherwise use default or determine from transaction type
-      let targetSheetName = e.parameter.sheetName || 'Transactions';
-      
-      // If no sheetName provided, check transaction type in row data (column 7, index 7)
-      if (!e.parameter.sheetName && dataArray.length > 7) {
-        const transactionType = dataArray[7]; // Type column (index 7)
-        if (transactionType === 'debit') {
-          targetSheetName = 'DebitTransactions';
-        }
-      }
-      
-      // Get or create the target sheet
-      let targetSheet = spreadsheet.getSheetByName(targetSheetName);
-      if (!targetSheet) {
-        targetSheet = spreadsheet.insertSheet(targetSheetName);
-        // Add headers if it's a new sheet
-        targetSheet.appendRow([
+    // Helper function to get or create a sheet
+    function getOrCreateSheet(sheetName) {
+      let sheet = spreadsheet.getSheetByName(sheetName);
+      if (!sheet) {
+        sheet = spreadsheet.insertSheet(sheetName);
+        // Add headers
+        sheet.appendRow([
           'Transaction ID',
           'Date',
           'Narration',
@@ -107,13 +59,51 @@ function doPost(e) {
           'Created At',
           'Updated At'
         ]);
-        Logger.log('Created new sheet: ' + targetSheetName);
+        Logger.log('Created new sheet: ' + sheetName);
+      } else {
+        // Add headers if sheet is empty
+        if (sheet.getLastRow() === 0) {
+          sheet.appendRow([
+            'Transaction ID',
+            'Date',
+            'Narration',
+            'Bank Ref No.',
+            'Amount',
+            'Party Name',
+            'Category',
+            'Type',
+            'Added to Vyapar',
+            'Vyapar Ref No.',
+            'Hold',
+            'Self Transfer',
+            'Notes',
+            'Created At',
+            'Updated At'
+          ]);
+        }
+      }
+      return sheet;
+    }
+    
+    if (action === 'appendRow') {
+      // Single row append
+      // Check if sheetName parameter is provided, otherwise use default or determine from transaction type
+      let targetSheetName = e.parameter.sheetName || 'Transactions';
+      
+      // If no sheetName provided, check transaction type in row data (column 7, index 7)
+      if (!e.parameter.sheetName && dataArray.length > 7) {
+        const transactionType = dataArray[7]; // Type column (index 7)
+        if (transactionType === 'debit') {
+          targetSheetName = 'DebitTransactions';
+        }
       }
       
-      targetSheet.appendRow(dataArray);
+      const sheet = getOrCreateSheet(targetSheetName);
+      sheet.appendRow(dataArray);
       Logger.log('Successfully appended 1 row to ' + targetSheetName + ' sheet');
       return ContentService.createTextOutput(JSON.stringify({ success: true, sheet: targetSheetName }))
         .setMimeType(ContentService.MimeType.JSON);
+        
     } else if (action === 'updateRow') {
       // Update existing row by Transaction ID or fallback matching
       const transactionId = e.parameter.transactionId;
@@ -213,6 +203,7 @@ function doPost(e) {
       Logger.log('Successfully updated row ' + rowIndex + ' in ' + targetSheetName + ' sheet for transaction ID: ' + transactionId + ' (date preserved)');
       return ContentService.createTextOutput(JSON.stringify({ success: true, row: rowIndex, sheet: targetSheetName }))
         .setMimeType(ContentService.MimeType.JSON);
+        
     } else if (action === 'appendRows') {
       // Batch append - multiple rows at once (much faster!)
       // Check if sheetName parameter is provided, otherwise use default or determine from transaction type
@@ -226,45 +217,22 @@ function doPost(e) {
         }
       }
       
-      // Get or create the target sheet
-      let targetSheet = spreadsheet.getSheetByName(targetSheetName);
-      if (!targetSheet) {
-        targetSheet = spreadsheet.insertSheet(targetSheetName);
-        // Add headers if it's a new sheet
-        targetSheet.appendRow([
-          'Transaction ID',
-          'Date',
-          'Narration',
-          'Bank Ref No.',
-          'Amount',
-          'Party Name',
-          'Category',
-          'Type',
-          'Added to Vyapar',
-          'Vyapar Ref No.',
-          'Hold',
-          'Self Transfer',
-          'Notes',
-          'Created At',
-          'Updated At'
-        ]);
-        Logger.log('Created new sheet: ' + targetSheetName);
-      }
+      const sheet = getOrCreateSheet(targetSheetName);
       
       Logger.log('Appending ' + dataArray.length + ' rows to sheet: ' + targetSheetName);
       
       if (dataArray.length > 0) {
         // Use setValues for batch insert (more efficient than appendRow in a loop)
-        const startRow = targetSheet.getLastRow() + 1;
-        targetSheet.getRange(startRow, 1, dataArray.length, dataArray[0].length).setValues(dataArray);
+        const startRow = sheet.getLastRow() + 1;
+        sheet.getRange(startRow, 1, dataArray.length, dataArray[0].length).setValues(dataArray);
       }
       
       Logger.log('Successfully appended ' + dataArray.length + ' rows to ' + targetSheetName + ' sheet');
       return ContentService.createTextOutput(JSON.stringify({ success: true, count: dataArray.length, sheet: targetSheetName }))
         .setMimeType(ContentService.MimeType.JSON);
+        
     } else if (action === 'appendPartyMapping') {
       // Append party mapping to PartyMappings sheet
-      const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
       let mappingSheet = spreadsheet.getSheetByName('PartyMappings');
       if (!mappingSheet) {
         // Create PartyMappings sheet if it doesn't exist
@@ -279,9 +247,9 @@ function doPost(e) {
       Logger.log('Successfully appended party mapping');
       return ContentService.createTextOutput(JSON.stringify({ success: true }))
         .setMimeType(ContentService.MimeType.JSON);
+        
     } else if (action === 'updatePartyMapping') {
       // Update existing party mapping by ID
-      const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
       let mappingSheet = spreadsheet.getSheetByName('PartyMappings');
       if (!mappingSheet) {
         return ContentService.createTextOutput(JSON.stringify({ success: false, error: 'PartyMappings sheet not found' }))
@@ -318,7 +286,8 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     
-    return ContentService.createTextOutput(JSON.stringify({ success: false, error: 'Invalid action' }))
+    // Unknown action
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: 'Invalid action: ' + action }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({ success: false, error: error.toString() }))
@@ -329,10 +298,10 @@ function doPost(e) {
 function doGet(e) {
   try {
     const action = e.parameter.action;
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     
     if (action === 'getTransactions') {
       // Fetch all transactions from the Transactions sheet
-      const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
       let sheet = spreadsheet.getSheetByName('Transactions');
       if (!sheet) {
         // Fallback to active sheet if Transactions sheet doesn't exist
@@ -352,54 +321,43 @@ function doGet(e) {
       const dataRows = values.slice(1);
       
       // Format dates as strings to avoid timezone issues
-      // Date column is index 1 (second column, 0-indexed)
-      const formattedRows = dataRows.map(function(row) {
-        const formattedRow = row.slice(); // Copy the row
-        
-        // Format date column (index 1) as "DD MMM YYYY" string
-        if (formattedRow[1] instanceof Date) {
-          const date = formattedRow[1];
-          var day = date.getDate();
-          day = day < 10 ? '0' + day : String(day);
-          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          const month = monthNames[date.getMonth()];
-          const year = date.getFullYear();
-          formattedRow[1] = day + ' ' + month + ' ' + year; // "DD MMM YYYY" format
-        } else if (formattedRow[1]) {
-          // If it's already a string, keep it as-is
-          formattedRow[1] = String(formattedRow[1]);
-        }
-        
-        // Format Created At (index 13) and Updated At (index 14) if they exist
-        if (formattedRow[13] instanceof Date) {
-          const date = formattedRow[13];
-          var day = date.getDate();
-          day = day < 10 ? '0' + day : String(day);
-          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          const month = monthNames[date.getMonth()];
-          const year = date.getFullYear();
-          formattedRow[13] = day + ' ' + month + ' ' + year;
-        }
-        
-        if (formattedRow[14] instanceof Date) {
-          const date = formattedRow[14];
-          var day = date.getDate();
-          day = day < 10 ? '0' + day : String(day);
-          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          const month = monthNames[date.getMonth()];
-          const year = date.getFullYear();
-          formattedRow[14] = day + ' ' + month + ' ' + year;
-        }
-        
-        return formattedRow;
-      });
+      const formattedRows = formatDateRows(dataRows);
       
-      Logger.log('Returning ' + formattedRows.length + ' transactions with formatted dates');
+      Logger.log('Returning ' + formattedRows.length + ' credit transactions with formatted dates');
       return ContentService.createTextOutput(JSON.stringify({ success: true, data: formattedRows }))
         .setMimeType(ContentService.MimeType.JSON);
+        
+    } else if (action === 'getDebitTransactions') {
+      // Fetch all debit transactions from the DebitTransactions sheet
+      let sheet = spreadsheet.getSheetByName('DebitTransactions');
+      if (!sheet) {
+        // Return empty array if DebitTransactions sheet doesn't exist
+        Logger.log('DebitTransactions sheet not found, returning empty array');
+        return ContentService.createTextOutput(JSON.stringify({ success: true, data: [] }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      
+      const dataRange = sheet.getDataRange();
+      const values = dataRange.getValues();
+      
+      // Skip header row (row 0)
+      if (values.length <= 1) {
+        return ContentService.createTextOutput(JSON.stringify({ success: true, data: [] }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      
+      // Get all data rows (skip header)
+      const dataRows = values.slice(1);
+      
+      // Format dates as strings to avoid timezone issues
+      const formattedRows = formatDateRows(dataRows);
+      
+      Logger.log('Returning ' + formattedRows.length + ' debit transactions with formatted dates');
+      return ContentService.createTextOutput(JSON.stringify({ success: true, data: formattedRows }))
+        .setMimeType(ContentService.MimeType.JSON);
+        
     } else if (action === 'getPartyMappings') {
       // Fetch all party mappings from the PartyMappings sheet
-      const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
       let sheet = spreadsheet.getSheetByName('PartyMappings');
       if (!sheet) {
         // Create PartyMappings sheet if it doesn't exist
@@ -422,9 +380,9 @@ function doGet(e) {
       Logger.log('Returning ' + dataRows.length + ' party mappings');
       return ContentService.createTextOutput(JSON.stringify({ success: true, data: dataRows }))
         .setMimeType(ContentService.MimeType.JSON);
+        
     } else if (action === 'getParties') {
       // Fetch all parties from the Parties sheet (for word-by-word matching)
-      const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
       let sheet = spreadsheet.getSheetByName('Parties');
       if (!sheet) {
         // Create Parties sheet if it doesn't exist
@@ -447,6 +405,31 @@ function doGet(e) {
       Logger.log('Returning ' + dataRows.length + ' parties');
       return ContentService.createTextOutput(JSON.stringify({ success: true, data: dataRows }))
         .setMimeType(ContentService.MimeType.JSON);
+        
+    } else if (action === 'getSuppliers') {
+      // Fetch all suppliers from the Suppliers sheet (for word-by-word matching in debit transactions)
+      let sheet = spreadsheet.getSheetByName('Suppliers');
+      if (!sheet) {
+        // Create Suppliers sheet if it doesn't exist
+        sheet = spreadsheet.insertSheet('Suppliers');
+        sheet.appendRow(['Supplier Name']); // Header row
+      }
+      
+      const dataRange = sheet.getDataRange();
+      const values = dataRange.getValues();
+      
+      // Skip header row (row 0)
+      if (values.length <= 1) {
+        return ContentService.createTextOutput(JSON.stringify({ success: true, data: [] }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      
+      // Get all data rows (skip header) - each row contains a supplier name in the first column
+      const dataRows = values.slice(1).map(row => [row[0] || '']); // Only return first column (supplier name)
+      
+      Logger.log('Returning ' + dataRows.length + ' suppliers');
+      return ContentService.createTextOutput(JSON.stringify({ success: true, data: dataRows }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
     
     // Default response
@@ -457,117 +440,65 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
 }
+
+// Helper function to format date rows
+function formatDateRows(dataRows) {
+  return dataRows.map(function(row) {
+    const formattedRow = row.slice(); // Copy the row
+    
+    // Format date column (index 1) as "DD MMM YYYY" string
+    if (formattedRow[1] instanceof Date) {
+      const date = formattedRow[1];
+      var day = date.getDate();
+      day = day < 10 ? '0' + day : String(day);
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = monthNames[date.getMonth()];
+      const year = date.getFullYear();
+      formattedRow[1] = day + ' ' + month + ' ' + year; // "DD MMM YYYY" format
+    } else if (formattedRow[1]) {
+      // If it's already a string, keep it as-is
+      formattedRow[1] = String(formattedRow[1]);
+    }
+    
+    // Format Created At (index 13) and Updated At (index 14) if they exist
+    if (formattedRow[13] instanceof Date) {
+      const date = formattedRow[13];
+      var day = date.getDate();
+      day = day < 10 ? '0' + day : String(day);
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = monthNames[date.getMonth()];
+      const year = date.getFullYear();
+      formattedRow[13] = day + ' ' + month + ' ' + year;
+    }
+    
+    if (formattedRow[14] instanceof Date) {
+      const date = formattedRow[14];
+      var day = date.getDate();
+      day = day < 10 ? '0' + day : String(day);
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = monthNames[date.getMonth()];
+      const year = date.getFullYear();
+      formattedRow[14] = day + ' ' + month + ' ' + year;
+    }
+    
+    return formattedRow;
+  });
+}
 ```
 
-## Step 1.5: Create Parties Sheet (Optional but Recommended)
+## Key Changes from Your Current Script:
 
-To enable word-by-word party name matching, create a separate sheet with your party names:
+1. **Unified Actions**: Uses the same actions (`appendRow`, `appendRows`, `updateRow`) for both credit and debit transactions, routing via the `sheetName` parameter
+2. **Sheet Name**: Uses "DebitTransactions" (no space) to match the frontend
+3. **Automatic Routing**: If `sheetName` is not provided, it determines the sheet from the transaction type (column 7)
+4. **Helper Function**: Added `getOrCreateSheet()` to reduce code duplication
+5. **Date Formatting**: Extracted to a helper function `formatDateRows()` for reuse
 
-1. In your Google Sheet, create a new sheet named **"Parties"**
-2. Add a header row: **Party Name** (in cell A1)
-3. List all your party names in column A (one per row), for example:
-   - ARCHANA HOSPITALS PVT LTD
-   - QUALITY CARE INDIA LTD
-   - ST THERESAS HOSPITAL
-   - HANISH HEALTH CARE SERVICES
-   - CHIRANJEVI MULTI SPECILITY HOSPITAL
-   - DOCTAZ HEALTH CARE PVT LTD
-   - etc.
+## Migration Note:
 
-The system will use this list to match party names word-by-word in transaction narrations, providing accurate recommendations.
+If you have existing data in "Debit Transactions" (with space), you can either:
+1. Rename the sheet to "DebitTransactions" (no space) in Google Sheets
+2. Or update the frontend to use "Debit Transactions" (with space)
 
-**How word-by-word matching works:**
-- The system checks if ALL significant words of a party name appear in the narration
-- For example, "HANISH HEALTH CARE SERVICES" will match if the narration contains: "hanish", "health", "care", and "services"
-- Common words like "pvt", "ltd", "and", "the" are ignored for matching
-- This ensures accurate recommendations without false positives
-
-## Step 2: Deploy as Web App
-
-1. Click **Deploy** → **New deployment**
-2. Click the gear icon ⚙️ next to "Select type" → Choose **Web app**
-3. Set:
-   - **Description**: "Credit Transactions API"
-   - **Execute as**: "Me"
-   - **Who has access**: "Anyone" (or "Anyone with Google account" for more security)
-4. Click **Deploy**
-5. **Copy the Web App URL** (looks like: `https://script.google.com/macros/s/.../exec`)
-
-## Step 3: Update Your App
-
-1. Open: `src/services/googleSheetsService.ts`
-2. Find this line:
-   ```typescript
-   const APPS_SCRIPT_URL = ''; // Add your Google Apps Script web app URL here
-   ```
-3. Replace the empty string with your Web App URL:
-   ```typescript
-   const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec';
-   ```
-
-## Step 4: Authorize the Script
-
-1. When you first run the script, Google will ask for authorization
-2. Click **Review Permissions**
-3. Choose your Google account
-4. Click **Advanced** → **Go to [Your Project Name] (unsafe)**
-5. Click **Allow**
-
-## Step 5: Test It
-
-1. Upload a CSV file with transactions
-2. Click "Save Transactions"
-3. Check your Google Sheet - the transactions should appear automatically!
-
-## How It Works
-
-- When you upload CSV and save transactions, they are automatically written to Google Sheets
-- Each transaction appears as a new row
-- If the sheet is empty, headers are automatically added
-- Transactions are saved one by one with a small delay to avoid rate limiting
-
-## Troubleshooting
-
-### "Google Apps Script URL not configured"
-- Make sure you've added the Web App URL to `googleSheetsService.ts`
-- The URL should start with `https://script.google.com/macros/s/`
-
-### "Failed to save to Google Sheets"
-- Check that the script is deployed and authorized
-- Make sure "Who has access" is set to "Anyone" or "Anyone with Google account"
-- Verify the sheet is not protected/read-only
-- Check the browser console for detailed error messages
-
-### Data not appearing in Google Sheets
-- Check the sheet name matches (default is "Sheet1")
-- Verify you're looking at the correct sheet
-- Make sure there are no empty rows at the top (headers should be in row 1)
-- Check the Apps Script execution log for errors
-
-### Rate Limiting
-- If you're uploading many transactions, they're saved with a 100ms delay between each
-- For very large batches (100+ transactions), you may need to wait a bit
-
-## Column Structure
-
-The following columns are written to Google Sheets:
-1. Date
-2. Narration
-3. Bank Ref No.
-4. Amount
-5. Party Name
-6. Category
-7. Type
-8. Added to Vyapar (Yes/No)
-9. Vyapar Ref No.
-10. Hold (Yes/No)
-11. Notes
-12. Created At
-13. Updated At
-
-## Notes
-
-- The Google Sheets integration is optional - if not configured, transactions will still be saved locally
-- You can configure it later without losing any data
-- The service gracefully handles errors and won't break the CSV upload if Google Sheets fails
+I recommend option 1 (renaming the sheet) to match the frontend code.
 

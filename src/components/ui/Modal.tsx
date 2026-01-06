@@ -68,25 +68,22 @@ export function Modal({ isOpen, onClose, title, children, className }: ModalProp
     >
       <div
         className={cn(
-          "glass-card rounded-lg shadow-xl w-full mx-4 sm:mx-6 md:mx-auto max-w-2xl max-h-[90vh] sm:max-h-[85vh] overflow-y-auto border-2 border-border/60 animate-scale-in",
+          "glass-card rounded-lg shadow-xl mx-4 sm:mx-6 md:mx-auto w-full max-w-md lg:max-w-lg max-h-[90vh] sm:max-h-[85vh] overflow-y-auto border-2 border-border/60 animate-scale-in",
           className
         )}
         onClick={(e) => e.stopPropagation()}
-        style={{
-          maxWidth: 'calc(100vw - 2rem)',
-        }}
       >
-        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border/60 bg-muted/30">
-          <h2 className="text-lg sm:text-xl md:text-2xl font-display font-bold text-foreground pr-2">{title}</h2>
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-border/60 bg-muted/30">
+          <h2 className="text-base sm:text-lg font-display font-bold text-foreground pr-2">{title}</h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-accent rounded-md transition-colors flex-shrink-0"
+            className="p-1.5 hover:bg-accent rounded-md transition-colors flex-shrink-0"
             aria-label="Close"
           >
-            <X className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
+            <X className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>
-        <div className="p-4 sm:p-6">{children}</div>
+        <div className="p-3 sm:p-4">{children}</div>
       </div>
     </div>
   );

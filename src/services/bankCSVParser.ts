@@ -40,23 +40,68 @@ export class BankCSVParser {
         let headerRowIndex = -1;
         let headerRow = "";
 
-        for (let i = 0; i < lines.length; i++) {
+        for (let i = 0; i < Math.min(50, lines.length); i++) {
           const line = lines[i].toLowerCase();
+          
+          // Skip metadata rows
+          if (
+            line.includes("page no") ||
+            line.includes("statement of account") ||
+            line.includes("statement of accounts") ||
+            line.includes("account statement") ||
+            (line.includes("hdfc") && line.length < 100) ||
+            line.match(/^[a-z\s]+bank/i)
+          ) {
+            continue;
+          }
+          
+          // Check if line has multiple columns (split by comma)
+          const columns = line.split(",");
+          if (columns.length < 3) continue; // Headers should have multiple columns
+          
+          // Look for actual header row
           if (
             line.includes("date") &&
-            (line.includes("narration") || line.includes("description")) &&
-            (line.includes("deposit") || line.includes("deposit amt"))
+            (line.includes("narration") || line.includes("description") || line.includes("particulars")) &&
+            (line.includes("deposit") || line.includes("withdrawal") || 
+             line.includes("credit") || line.includes("debit") ||
+             line.includes("amount"))
           ) {
-            headerRowIndex = i;
-            headerRow = lines[i];
-            break;
+            // Verify next line looks like data, not another header
+            if (i + 1 < lines.length) {
+              const nextLine = lines[i + 1].toLowerCase();
+              if (!nextLine.includes("date") && !nextLine.includes("page no")) {
+                headerRowIndex = i;
+                headerRow = lines[i];
+                break;
+              }
+            } else {
+              headerRowIndex = i;
+              headerRow = lines[i];
+              break;
+            }
+          }
+        }
+
+        if (headerRowIndex === -1) {
+          // Try a more lenient search
+          for (let i = 0; i < Math.min(50, lines.length); i++) {
+            const line = lines[i].toLowerCase();
+            const columns = line.split(",");
+            if (columns.length >= 5) {
+              if (line.includes("date") || line.includes("narration") || line.includes("amount")) {
+                headerRowIndex = i;
+                headerRow = lines[i];
+                break;
+              }
+            }
           }
         }
 
         if (headerRowIndex === -1) {
           reject(
             new Error(
-              "Could not find header row with Date, Narration, and Deposit Amt. columns"
+              "Could not find header row with Date, Narration, and Deposit/Withdrawal Amt. columns. Please ensure your file has proper column headers."
             )
           );
           return;
@@ -427,9 +472,16 @@ export class BankCSVParser {
       ? this.autoCategorize(narration)
       : this.autoCategorizeDebit(narration);
 
+    // Format date as YYYY-MM-DD without timezone conversion
+    // Use UTC methods to avoid timezone shifts
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateString = `${year}-${month}-${day}`;
+    
     const transaction: Transaction = {
       id: generateId(),
-      date: date.toISOString().split("T")[0],
+      date: dateString, // Use formatted string directly, no timezone conversion
       amount: amount,
       description: narration,
       type: type,

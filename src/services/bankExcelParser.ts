@@ -60,24 +60,82 @@ export class BankExcelParser {
           }
 
           // Find the header row (look for row containing "date", "narration", "deposit")
+          // Search more rows to handle bank statements with metadata
           let headerRowIndex = -1;
           let headers: any[] = [];
           
-          for (let i = 0; i < Math.min(10, jsonData.length); i++) {
+          for (let i = 0; i < Math.min(30, jsonData.length); i++) {
             const row = jsonData[i] as any[];
+            if (!row || row.length === 0) continue;
+            
+            // Skip rows that are clearly metadata (single cell with bank name, page numbers, etc.)
+            const nonEmptyCells = row.filter(cell => cell !== "" && cell !== null && cell !== undefined);
+            if (nonEmptyCells.length < 3) continue; // Headers should have at least 3 columns
+            
             const rowString = row.map(cell => String(cell || "").toLowerCase()).join(" ");
+            
+            // Skip rows that are clearly not headers (contain page numbers, statement titles, etc.)
             if (
-              rowString.includes("date") &&
-              (rowString.includes("narration") || rowString.includes("description")) &&
-              (rowString.includes("deposit") || rowString.includes("credit"))
+              rowString.includes("page no") ||
+              rowString.includes("statement of account") ||
+              rowString.includes("statement of accounts") ||
+              rowString.includes("account statement") ||
+              (rowString.includes("hdfc") && rowString.length < 100) || // Bank name alone
+              rowString.match(/^[a-z\s]+bank/i) // Just bank name
             ) {
-              headerRowIndex = i;
-              headers = row;
-              break;
+              continue;
+            }
+            
+            // Look for actual header row with date, narration, and deposit/withdrawal columns
+            const hasDate = rowString.includes("date") && !rowString.includes("value date");
+            const hasNarration = rowString.includes("narration") || rowString.includes("description") || rowString.includes("particulars");
+            const hasAmount = rowString.includes("deposit") || rowString.includes("withdrawal") || 
+                            rowString.includes("credit") || rowString.includes("debit") ||
+                            rowString.includes("amount");
+            
+            if (hasDate && hasNarration && hasAmount) {
+              // Verify this looks like a real header by checking if next row has data
+              if (i + 1 < jsonData.length) {
+                const nextRow = jsonData[i + 1] as any[];
+                const nextRowString = nextRow.map(cell => String(cell || "").toLowerCase()).join(" ");
+                // Next row should not be another header or metadata
+                if (!nextRowString.includes("date") && !nextRowString.includes("page no")) {
+                  headerRowIndex = i;
+                  headers = row;
+                  break;
+                }
+              } else {
+                headerRowIndex = i;
+                headers = row;
+                break;
+              }
             }
           }
 
-          // Fallback to first row if header not found
+          // Fallback: try to find any row with multiple columns that might be headers
+          if (headerRowIndex === -1) {
+            for (let i = 0; i < Math.min(30, jsonData.length); i++) {
+              const row = jsonData[i] as any[];
+              if (!row || row.length < 3) continue;
+              
+              const nonEmptyCount = row.filter(cell => {
+                const str = String(cell || "").trim();
+                return str !== "" && str.length > 0;
+              }).length;
+              
+              // If row has 5+ non-empty cells, it might be a header
+              if (nonEmptyCount >= 5) {
+                const rowString = row.map(cell => String(cell || "").toLowerCase()).join(" ");
+                if (rowString.includes("date") || rowString.includes("narration") || rowString.includes("amount")) {
+                  headerRowIndex = i;
+                  headers = row;
+                  break;
+                }
+              }
+            }
+          }
+          
+          // Last resort: use first row
           if (headerRowIndex === -1) {
             headers = jsonData[0] as any[];
             headerRowIndex = 0;
@@ -123,15 +181,24 @@ export class BankExcelParser {
               ? JSON.stringify(sampleRow, null, 2)
               : "none";
             
+            // Show first few rows of raw data for debugging
+            const firstFewRows = jsonData.slice(0, Math.min(5, jsonData.length))
+              .map((row, idx) => `Row ${idx + 1}: ${JSON.stringify(row.slice(0, 5))}`)
+              .join("\n");
+            
             reject(
               new Error(
-                `No deposit transactions found. Only rows with Deposit Amt. > 0 are processed.\n\n` +
-                `Found columns: ${availableColumns}\n` +
-                `Sample row values: ${sampleValues}\n\n` +
+                `No ${transactionType === 'credit' ? 'credit' : transactionType === 'debit' ? 'debit' : ''} transactions found.\n\n` +
+                `Header row found at: Row ${headerRowIndex + 1}\n` +
+                `Headers detected: ${headers.slice(0, 10).join(", ")}\n\n` +
+                `First few rows of data:\n${firstFewRows}\n\n` +
+                `Parsed columns: ${availableColumns}\n` +
+                `Sample row: ${sampleValues}\n\n` +
                 `Please check:\n` +
-                `1. File has headers: Date, Narration, Deposit Amt. (or similar)\n` +
-                `2. Deposit Amt. column contains values > 0\n` +
-                `3. Date format is valid (DD/MM/YYYY, DD-MM-YYYY, or Excel date format)`
+                `1. File has proper headers: Date, Narration, Deposit Amt./Withdrawal Amt.\n` +
+                `2. Headers are not in metadata rows (page numbers, bank names, etc.)\n` +
+                `3. ${transactionType === 'credit' ? 'Deposit' : transactionType === 'debit' ? 'Withdrawal' : 'Deposit or Withdrawal'} Amt. column contains values > 0\n` +
+                `4. Date format is valid (DD/MM/YYYY, DD-MM-YYYY, or Excel date format)`
               )
             );
             return;
@@ -393,9 +460,16 @@ export class BankExcelParser {
       ? this.autoCategorize(narration)
       : this.autoCategorizeDebit(narration);
 
+    // Format date as YYYY-MM-DD without timezone conversion
+    // Use date components directly to avoid timezone shifts
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateString = `${year}-${month}-${day}`;
+    
     const transaction: Transaction = {
       id: generateId(),
-      date: date.toISOString().split("T")[0],
+      date: dateString, // Use formatted string directly, no timezone conversion
       amount: amount,
       description: narration,
       type: type,

@@ -3274,29 +3274,29 @@ export function Transactions() {
         title="Add Transaction Details"
       >
         {editingTransaction && (
-          <div className="space-y-6">
+          <div className="space-y-3">
             {/* Transaction Details (Read-only) */}
-            <div className="space-y-4 p-5 bg-gradient-to-br from-slate-50 to-blue-50/30 rounded-xl border border-slate-200">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2 p-2.5 bg-gradient-to-br from-slate-50 to-blue-50/30 rounded-lg border border-slate-200">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Date</Label>
-                  <p className="text-base font-bold text-slate-900 whitespace-nowrap">{formatDate(editingTransaction.date)}</p>
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-0.5 block">Date</Label>
+                  <p className="text-xs font-bold text-slate-900 whitespace-nowrap">{formatDate(editingTransaction.date)}</p>
                 </div>
                 <div>
-                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Amount</Label>
-                  <p className="text-base font-bold text-green-600">
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-0.5 block">Amount</Label>
+                  <p className="text-xs font-bold text-green-600">
                     ₹{editingTransaction.amount.toLocaleString()}
                   </p>
                 </div>
               </div>
               <div>
-                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Narration</Label>
-                <p className="text-sm text-slate-700 leading-relaxed">{editingTransaction.description}</p>
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-0.5 block">Narration</Label>
+                <p className="text-xs text-slate-700 leading-relaxed line-clamp-2">{editingTransaction.description}</p>
               </div>
               {editingTransaction.referenceNumber && (
                 <div>
-                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Bank Ref No.</Label>
-                  <p className="text-sm font-mono bg-white px-3 py-2 rounded-lg border border-slate-200 text-slate-700">
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-0.5 block">Bank Ref No.</Label>
+                  <p className="text-xs font-mono bg-white px-2 py-1 rounded border border-slate-200 text-slate-700">
                     {editingTransaction.referenceNumber}
                   </p>
                 </div>
@@ -3304,19 +3304,19 @@ export function Transactions() {
             </div>
 
             {/* Party Name Input */}
-            <div className="space-y-2">
-              <Label htmlFor="modal-party-name" className="text-sm font-semibold">
-                Party Name <span className="text-muted-foreground text-xs">(Optional for Hold/Self Transfer)</span>
+            <div className="space-y-1.5">
+              <Label htmlFor="modal-party-name" className="text-xs font-semibold">
+                Party Name <span className="text-muted-foreground text-xs">(Optional)</span>
               </Label>
               <Input
                 id="modal-party-name"
                 value={modalPartyName}
                 onChange={(e) => setModalPartyName(e.target.value)}
                 placeholder="Enter party name"
-                className="w-full h-12 input-modern"
+                className="w-full h-10 input-modern text-sm"
               />
               {modalSuggestions.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {modalSuggestions
                     .filter(s => s !== modalPartyName)
                     .slice(0, 3)
@@ -3325,6 +3325,7 @@ export function Transactions() {
                         <Button
                           type="button"
                           variant="secondary"
+                          size="sm"
                           onClick={(e) => {
                             // If clicking on Info icon, show similar transactions
                             const target = e.target as HTMLElement;
@@ -3336,27 +3337,27 @@ export function Transactions() {
                               setModalPartyName(suggestion);
                             }
                           }}
-                          className="flex-shrink-0"
+                          className="flex-shrink-0 text-xs h-7 px-2"
                           title={`Use suggested: ${suggestion}`}
                         >
-                          <Sparkles className="h-4 w-4 mr-2" />
-                          Use: {suggestion}
+                          <Sparkles className="h-3 w-3 mr-1" />
+                          {suggestion}
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleShowModalSimilarTransactions(suggestion);
                             }}
-                            className="info-icon-button p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-200 rounded transition-colors flex-shrink-0 ml-1"
+                            className="info-icon-button p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-200 rounded transition-colors flex-shrink-0 ml-0.5"
                             title="Why this suggestion? Click to see transactions completed with this party name"
                           >
-                            <Info className="h-3 w-3" />
+                            <Info className="h-2.5 w-2.5" />
                           </button>
                         </Button>
                         {showModalSimilarTransactions?.suggestedName === suggestion && (
-                          <div className="modal-similar-transactions-tooltip absolute right-0 top-full mt-1 z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-3 min-w-[300px] max-w-[400px] max-h-[300px] overflow-y-auto">
-                            <div className="flex items-center justify-between mb-2">
-                              <h4 className="text-xs font-semibold text-gray-700">Transactions Completed with: {suggestion}</h4>
+                          <div className="modal-similar-transactions-tooltip absolute right-0 top-full mt-1 z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-2 min-w-[250px] max-w-[320px] max-h-[250px] overflow-y-auto">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <h4 className="text-xs font-semibold text-gray-700">Completed: {suggestion}</h4>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -3368,12 +3369,12 @@ export function Transactions() {
                               </button>
                             </div>
                             {modalSimilarTransactions.length > 0 ? (
-                              <div className="space-y-2">
+                              <div className="space-y-1.5">
                                 {modalSimilarTransactions.map((t) => (
-                                  <div key={t.id} className="text-xs border-b border-gray-200 pb-2 last:border-0">
+                                  <div key={t.id} className="text-xs border-b border-gray-200 pb-1.5 last:border-0">
                                     <div className="font-medium text-gray-900">{formatDate(t.date)}</div>
                                     <div className="text-gray-700 mt-0.5">₹{t.amount.toLocaleString()}</div>
-                                    <div className="text-gray-600 mt-0.5 line-clamp-2">{t.description || '-'}</div>
+                                    <div className="text-gray-600 mt-0.5 line-clamp-1">{t.description || '-'}</div>
                                   </div>
                                 ))}
                               </div>
@@ -3389,9 +3390,9 @@ export function Transactions() {
             </div>
 
             {/* Vyapar Reference Number Input */}
-            <div className="space-y-2">
-              <Label htmlFor="modal-vyapar-ref" className="text-sm font-semibold">
-                Vyapar Reference Number <span className="text-muted-foreground text-xs">(Optional for Hold/Self Transfer)</span>
+            <div className="space-y-1.5">
+              <Label htmlFor="modal-vyapar-ref" className="text-xs font-semibold">
+                Vyapar Reference <span className="text-muted-foreground text-xs">(Optional)</span>
               </Label>
               <Input
                 id="modal-vyapar-ref"
@@ -3402,42 +3403,40 @@ export function Transactions() {
                   if (duplicateError) setDuplicateError(null);
                 }}
                 placeholder="Enter Vyapar reference number"
-                className={cn("h-12 input-modern", duplicateError && "border-red-500 focus:border-red-500")}
+                className={cn("h-10 input-modern text-sm", duplicateError && "border-red-500 focus:border-red-500")}
                 disabled={isSavingToSheets}
               />
             </div>
 
             {/* Loading State */}
             {isSavingToSheets && (
-              <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <RefreshCw className="h-5 w-5 text-blue-600 animate-spin" />
+              <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <RefreshCw className="h-4 w-4 text-blue-600 animate-spin" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-blue-900">Saving data. Please wait...</p>
-                  <p className="text-xs text-blue-700 mt-1">Your transaction is being saved</p>
+                  <p className="text-xs font-medium text-blue-900">Saving data. Please wait...</p>
                 </div>
               </div>
             )}
 
             {/* Duplicate Error Message */}
             {duplicateError && !isSavingToSheets && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <p className="text-sm font-semibold text-red-900 mb-2">Duplicate Vyapar Reference Number</p>
-                    <p className="text-sm text-red-800 mb-3">{duplicateError.message}</p>
+                    <p className="text-xs font-semibold text-red-900 mb-1.5">Duplicate Vyapar Reference</p>
+                    <p className="text-xs text-red-800 mb-2">{duplicateError.message}</p>
                     {duplicateError.existingTransaction && (
-                      <div className="mt-3 p-3 bg-white rounded-md border border-red-200">
-                        <p className="text-xs font-semibold text-red-900 mb-2">Existing Transaction Details:</p>
-                        <div className="space-y-1 text-xs text-red-800">
-                          <p><span className="font-medium">Transaction ID:</span> {duplicateError.transactionId || 'N/A'}</p>
+                      <div className="mt-2 p-2 bg-white rounded border border-red-200">
+                        <p className="text-xs font-semibold text-red-900 mb-1">Existing Transaction:</p>
+                        <div className="space-y-0.5 text-xs text-red-800">
                           <p><span className="font-medium">Date:</span> {formatDate(duplicateError.existingTransaction.date || 'N/A')}</p>
                           <p><span className="font-medium">Amount:</span> ₹{duplicateError.existingTransaction.amount?.toLocaleString() || '0'}</p>
                           <p><span className="font-medium">Party:</span> {duplicateError.existingTransaction.partyName || 'N/A'}</p>
                         </div>
                       </div>
                     )}
-                    <p className="text-xs text-red-700 mt-3">Please use a different Vyapar reference number.</p>
+                    <p className="text-xs text-red-700 mt-2">Please use a different reference number.</p>
                   </div>
                 </div>
               </div>
@@ -3445,50 +3444,54 @@ export function Transactions() {
 
             {/* Success Message */}
             {saveSuccess && (
-              <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
-                <CheckCircle2 className="h-5 w-5 text-green-600" />
+              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-green-900">Transaction saved successfully!</p>
-                  <p className="text-xs text-green-700 mt-1">Moving to completed transactions...</p>
+                  <p className="text-xs font-medium text-green-900">Transaction saved successfully!</p>
                 </div>
               </div>
             )}
 
             {/* Action Buttons */}
-            <div className="flex justify-between gap-3 pt-6 border-t border-border">
+            <div className="flex justify-between gap-2 pt-3 border-t border-border">
               <Button 
                 variant="outline" 
+                size="sm"
                 onClick={handleCloseEditModal}
+                className="text-xs h-9"
               >
                 Cancel
               </Button>
-              <div className="flex gap-2">
+              <div className="flex gap-1.5">
                 <Button 
                   onClick={handleMoveToHold}
                   variant="outline"
-                  className="border-yellow-500 text-yellow-700 hover:bg-yellow-50"
+                  size="sm"
+                  className="border-yellow-500 text-yellow-700 hover:bg-yellow-50 text-xs h-9 px-3"
                 >
-                  Move to Hold
+                  Hold
                 </Button>
                 <Button 
                   onClick={handleMoveToSelfTransfer}
                   variant="outline"
-                  className="border-purple-500 text-purple-700 hover:bg-purple-50"
+                  size="sm"
+                  className="border-purple-500 text-purple-700 hover:bg-purple-50 text-xs h-9 px-3"
                 >
-                  Move to Self Transfer
+                  Self Transfer
                 </Button>
                 <Button 
                   onClick={handleSubmitTransaction}
-                  className="btn-gradient"
+                  size="sm"
+                  className="btn-gradient text-xs h-9 px-3"
                   disabled={isSavingToSheets}
                 >
                   {isSavingToSheets ? (
                     <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Saving data...
+                      <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                      Saving...
                     </>
                   ) : (
-                    "Submit & Move to Completed"
+                    "Submit"
                   )}
                 </Button>
               </div>

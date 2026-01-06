@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Transaction } from "../types/transaction";
 import { StorageService } from "../services/storageService";
-import { PartyMappingService } from "../services/partyMappingService";
+import { SupplierMappingService } from "../services/supplierMappingService";
 import { fetchDebitTransactionsFromSheets, isGoogleSheetsConfigured } from "../services/googleSheetsService";
 import { AuthService } from "../services/authService";
 import { formatDate } from "../lib/utils";
@@ -90,6 +90,20 @@ export function DebitTransactions() {
     cancelText?: string;
     variant?: 'warning' | 'info' | 'danger';
   } | null>(null);
+  // Selected transaction state for radio buttons
+  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(() => {
+    // Load from localStorage on mount
+    const saved = localStorage.getItem('selectedDebitTransactionId');
+    return saved || null;
+  });
+
+  // Handle transaction selection
+  const handleSelectTransaction = (transactionId: string) => {
+    setSelectedTransactionId(transactionId);
+    // Persist to localStorage
+    localStorage.setItem('selectedDebitTransactionId', transactionId);
+  };
+
   // Modal state for editing transaction
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalPartyName, setModalPartyName] = useState("");
@@ -317,6 +331,12 @@ export function DebitTransactions() {
     setCurrentPage(1);
   }, [searchQuery, view, dateFrom, dateTo]);
 
+  // Clear selected transaction when view changes
+  useEffect(() => {
+    setSelectedTransactionId(null);
+    localStorage.removeItem('selectedDebitTransactionId');
+  }, [view]);
+
   // Load suggestions for visible transactions when page changes or transactions load
   useEffect(() => {
     // Load suggestions for all visible (paginated) transactions
@@ -348,7 +368,7 @@ export function DebitTransactions() {
         
         // If transaction has a party name, check for suggestions for that name
         if (transaction.partyName) {
-          foundSuggestion = await PartyMappingService.getSuggestedName(transaction.partyName);
+          foundSuggestion = await SupplierMappingService.getSuggestedName(transaction.partyName);
           if (foundSuggestion && foundSuggestion.trim().length > 0 && foundSuggestion !== transaction.partyName) {
             setPartySuggestions(prev => ({ ...prev, [transaction.id]: [foundSuggestion] }));
             loadingSuggestionsRef.current.delete(transaction.id);
@@ -362,7 +382,7 @@ export function DebitTransactions() {
           let extractedPartyName: string | null = null;
           
           // NEW METHOD 0: Word-by-word matching against parties list from Google Sheets (PRIORITY)
-          const matchedParties = await PartyMappingService.findSuppliersFromNarration(desc, 3);
+          const matchedParties = await SupplierMappingService.findSuppliersFromNarration(desc, 3);
           if (matchedParties.length > 0) {
             // Filter out blank/empty recommendations
             const validParties = matchedParties.filter(p => p && p.trim().length > 0);
@@ -388,7 +408,7 @@ export function DebitTransactions() {
               if (!shouldExclude && extracted.length > 3 && extracted.length < 100) {
                 extractedPartyName = extracted;
                 // Check if we have a learned mapping for this extracted name
-                foundSuggestion = await PartyMappingService.getSuggestedName(extractedLower);
+                foundSuggestion = await SupplierMappingService.getSuggestedName(extractedLower);
                 // Only use suggestion if it's not blank
                 if (!foundSuggestion || foundSuggestion.trim().length === 0) {
                   foundSuggestion = null;
@@ -418,7 +438,7 @@ export function DebitTransactions() {
                 const extracted = match[1].trim().toLowerCase();
                 // Filter out "SRI RAJA" patterns and other unwanted text
                 if (!extracted.includes('sri raja') && extracted.length > 3 && extracted.length < 100) {
-                  foundSuggestion = await PartyMappingService.getSuggestedName(extracted);
+                  foundSuggestion = await SupplierMappingService.getSuggestedName(extracted);
                   // Only use suggestion if it's not blank
                   if (foundSuggestion && foundSuggestion.trim().length > 0) {
                     break;
@@ -447,7 +467,7 @@ export function DebitTransactions() {
               for (let len = 2; len <= 4 && i + len <= parts.length; len++) {
                 const phrase = parts.slice(i, i + len).join(" ").toLowerCase();
                 if (phrase.length > 5 && phrase.length < 80) {
-                  foundSuggestion = await PartyMappingService.getSuggestedName(phrase);
+                  foundSuggestion = await SupplierMappingService.getSuggestedName(phrase);
                   // Only use suggestion if it's not blank
                   if (foundSuggestion && foundSuggestion.trim().length > 0) {
                     break;
@@ -476,7 +496,7 @@ export function DebitTransactions() {
               .toLowerCase();
             
             if (cleanedDesc.length > 5) {
-              foundSuggestion = await PartyMappingService.getSuggestedName(cleanedDesc);
+              foundSuggestion = await SupplierMappingService.getSuggestedName(cleanedDesc);
               // Only use suggestion if it's not blank
               if (!foundSuggestion || foundSuggestion.trim().length === 0) {
                 foundSuggestion = null;
@@ -762,7 +782,7 @@ export function DebitTransactions() {
             significantWords.some(word => extracted.includes(word));
           
           if (hasMatch && extracted.length > 3 && extracted.length < 100 && !learnedPatterns.includes(extracted)) {
-            await PartyMappingService.learnMapping(extracted, newName).catch(err => {
+            await SupplierMappingService.learnMapping(extracted, newName).catch(err => {
               console.error('Error learning mapping:', err);
             });
             learnedPatterns.push(extracted);
@@ -781,7 +801,7 @@ export function DebitTransactions() {
           const extracted = nameMatch[1].trim();
           const cleaned = extracted.replace(/^[\s\-:]+|[\s\-:]+$/g, '').replace(/[\s\-:]+/g, ' ');
           if (cleaned.length > 3 && cleaned.length < 100 && !learnedPatterns.includes(cleaned.toLowerCase())) {
-            await PartyMappingService.learnMapping(cleaned.toLowerCase(), newName).catch(err => {
+            await SupplierMappingService.learnMapping(cleaned.toLowerCase(), newName).catch(err => {
               console.error('Error learning mapping:', err);
             });
             learnedPatterns.push(cleaned.toLowerCase());
@@ -798,7 +818,7 @@ export function DebitTransactions() {
           significantWords.some(word => extracted.includes(word));
         
         if (hasMatch && extracted.length > 3 && extracted.length < 100 && !learnedPatterns.includes(extracted)) {
-          await PartyMappingService.learnMapping(extracted, newName).catch(err => {
+          await SupplierMappingService.learnMapping(extracted, newName).catch(err => {
             console.error('Error learning mapping:', err);
           });
           learnedPatterns.push(extracted);
@@ -825,7 +845,7 @@ export function DebitTransactions() {
           const hasMatch = partyWords.some(word => word.length > 3 && phraseLower.includes(word));
           
           if (hasMatch && phrase.length > 5 && phrase.length < 100 && !learnedPatterns.includes(phraseLower)) {
-            await PartyMappingService.learnMapping(phraseLower, newName).catch(err => {
+            await SupplierMappingService.learnMapping(phraseLower, newName).catch(err => {
               console.error('Error learning mapping:', err);
             });
             learnedPatterns.push(phraseLower);
@@ -849,7 +869,7 @@ export function DebitTransactions() {
         .toLowerCase();
       
       if (cleanedDesc.length > 5 && !learnedPatterns.includes(cleanedDesc)) {
-        await PartyMappingService.learnMapping(cleanedDesc, newName).catch(err => {
+        await SupplierMappingService.learnMapping(cleanedDesc, newName).catch(err => {
           console.error('Error learning mapping:', err);
         });
         learnedPatterns.push(cleanedDesc);
@@ -865,7 +885,7 @@ export function DebitTransactions() {
           if (phrase.length > 5 && !learnedPatterns.includes(phrase)) {
             const hasMatch = partyWords.some(word => word.length > 3 && phrase.includes(word));
             if (hasMatch) {
-              await PartyMappingService.learnMapping(phrase, newName).catch(err => {
+              await SupplierMappingService.learnMapping(phrase, newName).catch(err => {
                 console.error('Error learning mapping:', err);
               });
               learnedPatterns.push(phrase);
@@ -879,7 +899,7 @@ export function DebitTransactions() {
           if (phrase.length > 5 && !learnedPatterns.includes(phrase)) {
             const hasMatch = partyWords.some(word => word.length > 3 && phrase.includes(word));
             if (hasMatch) {
-              await PartyMappingService.learnMapping(phrase, newName).catch(err => {
+              await SupplierMappingService.learnMapping(phrase, newName).catch(err => {
                 console.error('Error learning mapping:', err);
               });
               learnedPatterns.push(phrase);
@@ -893,7 +913,7 @@ export function DebitTransactions() {
 
     // Also learn from original name if it exists (for corrections)
     if (originalName && originalName.trim() !== "" && originalName !== newName) {
-        await PartyMappingService.learnMapping(originalName, newName).catch(err => {
+        await SupplierMappingService.learnMapping(originalName, newName).catch(err => {
           console.error('Error learning mapping:', err);
         });
     }
@@ -906,7 +926,7 @@ export function DebitTransactions() {
 
     // Also manually trigger training from narration for this transaction
     if (transaction && transaction.description) {
-        await PartyMappingService.autoTrainFromNarration(transaction.description, newName).catch(err => {
+        await SupplierMappingService.autoTrainFromNarration(transaction.description, newName).catch(err => {
           console.error('Error training from narration:', err);
         });
       }
@@ -922,7 +942,7 @@ export function DebitTransactions() {
         paginatedTransactions.forEach(t => {
           if (t.partyName && !loadingSuggestionsRef.current.has(t.id)) {
             loadingSuggestionsRef.current.add(t.id);
-            PartyMappingService.getSuggestedName(t.partyName).then(suggested => {
+            SupplierMappingService.getSuggestedName(t.partyName).then(suggested => {
               if (suggested && suggested.trim().length > 0 && suggested !== t.partyName) {
                 setPartySuggestions(prev => ({ ...prev, [t.id]: [suggested] }));
               }
@@ -947,7 +967,7 @@ export function DebitTransactions() {
   // Get suggestion from narration (for transactions without party names)
   // Note: getSuggestionFromNarration is now removed - suggestions are handled via async calls in the UI
   // This function is kept for backward compatibility but returns null
-  // The actual suggestion logic is now in the render code using async PartyMappingService calls
+  // The actual suggestion logic is now in the render code using async SupplierMappingService calls
   const getSuggestionFromNarration = (description: string | undefined): string | null => {
     // This function is deprecated - suggestions are now handled asynchronously in the UI
     return null;
@@ -1035,7 +1055,7 @@ export function DebitTransactions() {
     if (!transaction) return;
     
     // Learn the mapping (async)
-    await PartyMappingService.learnMapping(originalName, suggestedName).catch(err => {
+    await SupplierMappingService.learnMapping(originalName, suggestedName).catch(err => {
       console.error('Error learning party mapping:', err);
     });
 
@@ -1046,7 +1066,7 @@ export function DebitTransactions() {
 
     // Also learn from narration if available
     if (transaction && transaction.description) {
-      PartyMappingService.autoTrainFromNarration(transaction.description, suggestedName).catch(err => {
+      SupplierMappingService.autoTrainFromNarration(transaction.description, suggestedName).catch(err => {
         console.error('Error training party mapping:', err);
       });
     }
@@ -1072,7 +1092,7 @@ export function DebitTransactions() {
       let foundSuggestions: string[] = []; // Track suggestions locally
       
       // Try word-by-word matching first (returns top 2-3 matches) - USE SUPPLIERS for debit transactions
-      const matchedParties = await PartyMappingService.findSuppliersFromNarration(desc, 3);
+      const matchedParties = await SupplierMappingService.findSuppliersFromNarration(desc, 3);
       if (matchedParties.length > 0) {
         // Filter out blank/empty recommendations
         const validParties = matchedParties.filter(p => p && p.trim().length > 0);
@@ -1101,7 +1121,7 @@ export function DebitTransactions() {
         
         // If we extracted a name, try to get suggestion for it
         if (extractedName) {
-          const suggested = await PartyMappingService.getSuggestedName(extractedName);
+          const suggested = await SupplierMappingService.getSuggestedName(extractedName);
           if (suggested && suggested.trim().length > 0) {
             foundSuggestions = [suggested];
           }
@@ -1121,7 +1141,7 @@ export function DebitTransactions() {
         
         const tempSuggestions: string[] = [];
         for (const part of parts) {
-          const suggested = await PartyMappingService.getSuggestedName(part);
+          const suggested = await SupplierMappingService.getSuggestedName(part);
           if (suggested && suggested.trim().length > 0 && !tempSuggestions.includes(suggested)) {
             tempSuggestions.push(suggested);
             if (tempSuggestions.length >= 3) break;
@@ -1212,7 +1232,7 @@ export function DebitTransactions() {
     
     // Learn from narration
     if (editingTransaction.description) {
-      PartyMappingService.autoTrainFromNarration(editingTransaction.description, partyName).catch(err => {
+      SupplierMappingService.autoTrainFromNarration(editingTransaction.description, partyName).catch(err => {
         console.error('Error training party mapping:', err);
       });
     }
@@ -1244,7 +1264,7 @@ export function DebitTransactions() {
     
     // Learn from narration if party name was provided
     if (editingTransaction.description && modalPartyName.trim()) {
-      PartyMappingService.autoTrainFromNarration(editingTransaction.description, modalPartyName.trim()).catch(err => {
+      SupplierMappingService.autoTrainFromNarration(editingTransaction.description, modalPartyName.trim()).catch(err => {
         console.error('Error training party mapping:', err);
       });
     }
@@ -1298,7 +1318,7 @@ export function DebitTransactions() {
     
     // Learn from narration if party name was provided
     if (editingTransaction.description && modalPartyName.trim()) {
-      PartyMappingService.autoTrainFromNarration(editingTransaction.description, modalPartyName.trim()).catch(err => {
+      SupplierMappingService.autoTrainFromNarration(editingTransaction.description, modalPartyName.trim()).catch(err => {
         console.error('Error training party mapping:', err);
       });
     }
@@ -1832,6 +1852,7 @@ export function DebitTransactions() {
                     <table className="w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
+                          <th className="p-3 text-center text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300" style={{ width: '60px' }}></th>
                           <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Date</th>
                           <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Narration</th>
                           <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">Bank Ref No.</th>
@@ -1843,8 +1864,21 @@ export function DebitTransactions() {
                         {paginatedTransactions.map((transaction) => (
                           <tr
                             key={transaction.id}
-                            className="border-b border-slate-300 bg-card hover:bg-muted/50 transition-colors"
+                            className={cn(
+                              "border-b border-slate-300 bg-card hover:bg-muted/50 transition-colors",
+                              selectedTransactionId === transaction.id && "bg-blue-50 border-blue-300 border-l-4 border-l-blue-500"
+                            )}
                           >
+                            <td className="p-3 text-center border-r border-slate-300" style={{ width: '60px' }}>
+                              <input
+                                type="radio"
+                                name="selectedDebitTransaction"
+                                checked={selectedTransactionId === transaction.id}
+                                onChange={() => handleSelectTransaction(transaction.id)}
+                                className="h-4 w-4 text-primary cursor-pointer"
+                                title="Select this transaction"
+                              />
+                            </td>
                             <td className="p-3 text-sm border-r border-slate-300 whitespace-nowrap">{formatDate(transaction.date)}</td>
                             <td className="p-3 text-sm border-r border-slate-300">{transaction.description}</td>
                             <td className="p-3 text-sm text-muted-foreground border-r border-slate-300">
@@ -1856,9 +1890,23 @@ export function DebitTransactions() {
                             <td className="p-3">
                               <button
                                 type="button"
-                                onClick={() => handleOpenEditModal(transaction)}
-                                className="p-2 hover:bg-primary/10 rounded-md transition-colors"
-                                title="Edit transaction"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={(e) => {
+                                  if (selectedTransactionId !== transaction.id) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    return;
+                                  }
+                                  handleOpenEditModal(transaction);
+                                }}
+                                className={cn(
+                                  "p-2 rounded-md transition-colors",
+                                  selectedTransactionId === transaction.id
+                                    ? "hover:opacity-80 cursor-pointer hover:bg-primary/10 border-primary/20"
+                                    : "opacity-40 cursor-not-allowed border-gray-300 bg-gray-100"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Edit transaction" : "Please select this transaction first"}
                               >
                                 <Pencil className="h-4 w-4 text-primary" />
                               </button>
@@ -1959,6 +2007,7 @@ export function DebitTransactions() {
             <table className="w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
+                  <th className="p-3 text-center text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300" style={{ width: '60px' }}></th>
                   <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300 border-r border-slate-300">Added to Vyapar</th>
                     <th className="p-3 text-left text-sm font-medium text-muted-foreground border-b-2 border-slate-300">
                       <div className="flex items-center gap-2">
@@ -2000,7 +2049,7 @@ export function DebitTransactions() {
               <tbody>
                 {filteredTransactions.length === 0 ? (
                   <tr>
-                      <td colSpan={view === "hold" || view === "selfTransfer" ? 7 : 8} className="p-8 text-center text-muted-foreground border-b border-slate-300">
+                      <td colSpan={view === "hold" || view === "selfTransfer" ? 8 : 9} className="p-8 text-center text-muted-foreground border-b border-slate-300">
                       No transactions found
                     </td>
                   </tr>
@@ -2020,9 +2069,20 @@ export function DebitTransactions() {
                           "border-b border-slate-300 bg-card hover:bg-muted/50 transition-colors group",
                           transaction.hold && "bg-yellow-50",
                           transaction.selfTransfer && "bg-purple-50",
-                          !transaction.hold && !transaction.selfTransfer && isAdded && "bg-green-50"
+                          !transaction.hold && !transaction.selfTransfer && isAdded && "bg-green-50",
+                          selectedTransactionId === transaction.id && "bg-blue-50 border-blue-300 border-l-4 border-l-blue-500"
                         )}
                       >
+                        <td className="p-3 text-center border-r border-slate-300" style={{ width: '60px' }}>
+                          <input
+                            type="radio"
+                            name="selectedDebitTransaction"
+                            checked={selectedTransactionId === transaction.id}
+                            onChange={() => handleSelectTransaction(transaction.id)}
+                            className="h-4 w-4 text-primary cursor-pointer"
+                            title="Select this transaction"
+                          />
+                        </td>
                         <td className="p-3 border-r border-slate-300">
                           <Checkbox
                             checked={isAdded}
@@ -2295,27 +2355,49 @@ export function DebitTransactions() {
                               <>
                                 <button
                                   type="button"
+                                  disabled={selectedTransactionId !== transaction.id}
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={(e) => {
+                                    if (selectedTransactionId !== transaction.id) {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      return;
+                                    }
                                     e.preventDefault();
                                     e.stopPropagation();
                                     handleConfirm(transaction.id);
                                   }}
-                                  className="flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer p-1"
-                                  title="Confirm and move to Completed"
+                                  className={cn(
+                                    "flex-shrink-0 transition-opacity p-1",
+                                    selectedTransactionId === transaction.id
+                                      ? "hover:opacity-80 cursor-pointer"
+                                      : "opacity-40 cursor-not-allowed"
+                                  )}
+                                  title={selectedTransactionId === transaction.id ? "Confirm and move to Completed" : "Please select this transaction first"}
                                 >
                                   <CheckCircle2 className="h-5 w-5 text-green-600" />
                                 </button>
                                 <button
                                   type="button"
+                                  disabled={selectedTransactionId !== transaction.id}
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={(e) => {
+                                    if (selectedTransactionId !== transaction.id) {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      return;
+                                    }
                                     e.preventDefault();
                                     e.stopPropagation();
                                     handleCancel(transaction.id);
                                   }}
-                                  className="flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer p-1"
-                                  title="Cancel and deselect"
+                                  className={cn(
+                                    "flex-shrink-0 transition-opacity p-1",
+                                    selectedTransactionId === transaction.id
+                                      ? "hover:opacity-80 cursor-pointer"
+                                      : "opacity-40 cursor-not-allowed"
+                                  )}
+                                  title={selectedTransactionId === transaction.id ? "Cancel and deselect" : "Please select this transaction first"}
                                 >
                                   <X className="h-5 w-5 text-red-600" />
                                 </button>
@@ -2326,13 +2408,61 @@ export function DebitTransactions() {
                         )}
                         <td className="p-3">
                           <div className="flex items-center gap-2">
+                            {/* Cancel button for completed transactions - moves back to pending */}
+                            {(() => {
+                              const hasPartyName = Boolean(transaction.partyName && transaction.partyName.trim() !== '');
+                              const isCompleted = isAdded && hasReference && hasPartyName;
+                              const isSelected = selectedTransactionId === transaction.id;
+                              
+                              // Show cancel button only for completed transactions
+                              if (isCompleted && view === "completed") {
+                                return (
+                                <button
+                                  type="button"
+                                  disabled={!isSelected}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={(e) => {
+                                    if (!isSelected) {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      return;
+                                    }
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleCancel(transaction.id);
+                                  }}
+                                  className={cn(
+                                    "flex-shrink-0 transition-opacity p-1.5 rounded border",
+                                    isSelected 
+                                      ? "hover:opacity-80 cursor-pointer hover:bg-red-50 border-red-200" 
+                                      : "opacity-40 cursor-not-allowed border-gray-300 bg-gray-100"
+                                  )}
+                                  title={isSelected ? "Cancel transaction and move back to pending" : "Please select this transaction first"}
+                                >
+                                  <X className="h-5 w-5 text-red-600" />
+                                </button>
+                                );
+                              }
+                              return null;
+                            })()}
                             {transaction.hold ? (
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleUnhold(transaction.id)}
-                                className="text-xs bg-yellow-50 hover:bg-yellow-100"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onClick={() => {
+                                  if (selectedTransactionId === transaction.id) {
+                                    handleUnhold(transaction.id);
+                                  }
+                                }}
+                                className={cn(
+                                  "text-xs",
+                                  selectedTransactionId === transaction.id
+                                    ? "bg-yellow-50 hover:bg-yellow-100"
+                                    : "bg-gray-100 opacity-40 cursor-not-allowed"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Unhold" : "Please select this transaction first"}
                               >
                                 <XCircle className="h-3.5 w-3.5 mr-1.5" />
                                 Unhold
@@ -2342,8 +2472,19 @@ export function DebitTransactions() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleSetHold(transaction.id)}
-                                className="text-xs bg-yellow-50 hover:bg-yellow-100"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onClick={() => {
+                                  if (selectedTransactionId === transaction.id) {
+                                    handleSetHold(transaction.id);
+                                  }
+                                }}
+                                className={cn(
+                                  "text-xs",
+                                  selectedTransactionId === transaction.id
+                                    ? "bg-yellow-50 hover:bg-yellow-100"
+                                    : "bg-gray-100 opacity-40 cursor-not-allowed"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Hold" : "Please select this transaction first"}
                               >
                                 <Clock className="h-3.5 w-3.5 mr-1.5" />
                                 Hold
@@ -2354,8 +2495,19 @@ export function DebitTransactions() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleUnsetSelfTransfer(transaction.id)}
-                                className="text-xs bg-purple-50 hover:bg-purple-100"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onClick={() => {
+                                  if (selectedTransactionId === transaction.id) {
+                                    handleUnsetSelfTransfer(transaction.id);
+                                  }
+                                }}
+                                className={cn(
+                                  "text-xs",
+                                  selectedTransactionId === transaction.id
+                                    ? "bg-purple-50 hover:bg-purple-100"
+                                    : "bg-gray-100 opacity-40 cursor-not-allowed"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Remove Self Transfer" : "Please select this transaction first"}
                               >
                                 <XCircle className="h-3.5 w-3.5 mr-1.5" />
                                 Remove Self Transfer
@@ -2365,8 +2517,19 @@ export function DebitTransactions() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleSetSelfTransfer(transaction.id)}
-                                className="text-xs bg-purple-50 hover:bg-purple-100"
+                                disabled={selectedTransactionId !== transaction.id}
+                                onClick={() => {
+                                  if (selectedTransactionId === transaction.id) {
+                                    handleSetSelfTransfer(transaction.id);
+                                  }
+                                }}
+                                className={cn(
+                                  "text-xs",
+                                  selectedTransactionId === transaction.id
+                                    ? "bg-purple-50 hover:bg-purple-100"
+                                    : "bg-gray-100 opacity-40 cursor-not-allowed"
+                                )}
+                                title={selectedTransactionId === transaction.id ? "Self Transfer" : "Please select this transaction first"}
                               >
                                 Self Transfer
                               </Button>
@@ -2469,29 +2632,29 @@ export function DebitTransactions() {
         title="Add Transaction Details"
       >
         {editingTransaction && (
-          <div className="space-y-6">
+          <div className="space-y-3">
             {/* Transaction Details (Read-only) */}
-            <div className="space-y-4 p-5 bg-gradient-to-br from-slate-50 to-blue-50/30 rounded-xl border border-slate-200">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2 p-2.5 bg-gradient-to-br from-slate-50 to-blue-50/30 rounded-lg border border-slate-200">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Date</Label>
-                  <p className="text-base font-bold text-slate-900 whitespace-nowrap">{formatDate(editingTransaction.date)}</p>
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-0.5 block">Date</Label>
+                  <p className="text-xs font-bold text-slate-900 whitespace-nowrap">{formatDate(editingTransaction.date)}</p>
                 </div>
                 <div>
-                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Amount</Label>
-                  <p className="text-base font-bold text-green-600">
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-0.5 block">Amount</Label>
+                  <p className="text-xs font-bold text-green-600">
                     ₹{editingTransaction.amount.toLocaleString()}
                   </p>
                 </div>
               </div>
               <div>
-                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Narration</Label>
-                <p className="text-sm text-slate-700 leading-relaxed">{editingTransaction.description}</p>
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-0.5 block">Narration</Label>
+                <p className="text-xs text-slate-700 leading-relaxed line-clamp-2">{editingTransaction.description}</p>
               </div>
               {editingTransaction.referenceNumber && (
                 <div>
-                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2 block">Bank Ref No.</Label>
-                  <p className="text-sm font-mono bg-white px-3 py-2 rounded-lg border border-slate-200 text-slate-700">
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-0.5 block">Bank Ref No.</Label>
+                  <p className="text-xs font-mono bg-white px-2 py-1 rounded border border-slate-200 text-slate-700">
                     {editingTransaction.referenceNumber}
                   </p>
                 </div>
@@ -2511,7 +2674,7 @@ export function DebitTransactions() {
                 className="w-full h-12 input-modern"
               />
               {modalSuggestions.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {modalSuggestions
                     .filter(s => s !== modalPartyName)
                     .slice(0, 3)
@@ -2520,12 +2683,13 @@ export function DebitTransactions() {
                         key={idx}
                         type="button"
                         variant="secondary"
+                        size="sm"
                         onClick={() => setModalPartyName(suggestion)}
-                        className="flex-shrink-0"
+                        className="flex-shrink-0 text-xs h-7 px-2"
                         title={`Use suggested: ${suggestion}`}
                       >
-                        <Sparkles className="h-4 w-4 mr-2" />
-                        Use: {suggestion}
+                        <Sparkles className="h-3 w-3 mr-1" />
+                        {suggestion}
                       </Button>
                     ))}
                 </div>
@@ -2533,47 +2697,52 @@ export function DebitTransactions() {
             </div>
 
             {/* Vyapar Reference Number Input */}
-            <div className="space-y-2">
-              <Label htmlFor="modal-vyapar-ref" className="text-sm font-semibold">
-                Vyapar Reference Number <span className="text-muted-foreground text-xs">(Optional for Hold/Self Transfer)</span>
+            <div className="space-y-1.5">
+              <Label htmlFor="modal-vyapar-ref" className="text-xs font-semibold">
+                Vyapar Reference <span className="text-muted-foreground text-xs">(Optional)</span>
               </Label>
               <Input
                 id="modal-vyapar-ref"
                 value={modalVyaparRef}
                 onChange={(e) => setModalVyaparRef(e.target.value)}
                 placeholder="Enter Vyapar reference number"
-                className="h-12 input-modern"
+                className="h-10 input-modern text-sm"
               />
             </div>
 
             {/* Action Buttons */}
-            <div className="flex justify-between gap-3 pt-6 border-t border-border">
+            <div className="flex justify-between gap-2 pt-3 border-t border-border">
               <Button 
                 variant="outline" 
+                size="sm"
                 onClick={handleCloseEditModal}
+                className="text-xs h-9"
               >
                 Cancel
               </Button>
-              <div className="flex gap-2">
+              <div className="flex gap-1.5">
                 <Button 
                   onClick={handleMoveToHold}
                   variant="outline"
-                  className="border-yellow-500 text-yellow-700 hover:bg-yellow-50"
+                  size="sm"
+                  className="border-yellow-500 text-yellow-700 hover:bg-yellow-50 text-xs h-9 px-3"
                 >
-                  Move to Hold
+                  Hold
                 </Button>
                 <Button 
                   onClick={handleMoveToSelfTransfer}
                   variant="outline"
-                  className="border-purple-500 text-purple-700 hover:bg-purple-50"
+                  size="sm"
+                  className="border-purple-500 text-purple-700 hover:bg-purple-50 text-xs h-9 px-3"
                 >
-                  Move to Self Transfer
+                  Self Transfer
                 </Button>
                 <Button 
                   onClick={handleSubmitTransaction}
-                  className="btn-gradient"
+                  size="sm"
+                  className="btn-gradient text-xs h-9 px-3"
                 >
-                  Submit & Move to Completed
+                  Submit
                 </Button>
               </div>
             </div>

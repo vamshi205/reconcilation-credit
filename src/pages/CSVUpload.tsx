@@ -4,14 +4,17 @@ import { Button } from "../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Select } from "../components/ui/Select";
 import { Label } from "../components/ui/Label";
+import { Modal } from "../components/ui/Modal";
+import { Input } from "../components/ui/Input";
 import { BankCSVParser } from "../services/bankCSVParser";
 import { BankExcelParser } from "../services/bankExcelParser";
 import { Transaction } from "../types/transaction";
 import { StorageService } from "../services/storageService";
 import { PartyMappingService } from "../services/partyMappingService";
+import { SupplierMappingService } from "../services/supplierMappingService";
 import { saveTransactionsToSheets, isGoogleSheetsConfigured, getGoogleSheetsURL, testGoogleSheetsConnection } from "../services/googleSheetsService";
 import { generateId, formatDate } from "../lib/utils";
-import { Upload, FileText, CheckCircle, XCircle, Sparkles } from "lucide-react";
+import { Upload, FileText, CheckCircle, XCircle, Sparkles, Copy, ExternalLink } from "lucide-react";
 
 // Storage key for tracking uploaded files
 const UPLOADED_FILES_KEY = "uploaded_files_tracker";
@@ -89,6 +92,8 @@ export function CSVUpload() {
   const [isTestingSheets, setIsTestingSheets] = useState(false);
   const [suggestionsCache, setSuggestionsCache] = useState<Record<string, string | null>>({});
   const [transactionType, setTransactionType] = useState<'credit' | 'debit' | 'both'>('credit');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authURL, setAuthURL] = useState<string>('');
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -212,8 +217,12 @@ export function CSVUpload() {
       // Transactions are already in the correct format from parser
       // Apply mappings and prepare for Google Sheets
       for (const transaction of parsedTransactions) {
+        // Use SupplierMappingService for debit transactions, PartyMappingService for credit
+        const isDebit = transaction.type === 'debit';
+        const mappingService = isDebit ? SupplierMappingService : PartyMappingService;
+        
         // Apply any learned mappings before saving (async)
-        const correctedName = await PartyMappingService.applyMapping(transaction.partyName);
+        const correctedName = await mappingService.applyMapping(transaction.partyName);
         const finalTransaction = {
           ...transaction,
           partyName: correctedName,
@@ -224,12 +233,20 @@ export function CSVUpload() {
         
         // Also train from narration if party name was applied from suggestion
         if (finalTransaction.description && correctedName && correctedName !== transaction.partyName) {
-          PartyMappingService.autoTrainFromNarration(finalTransaction.description, correctedName).catch(err => {
-            console.error('Error training party mapping:', err);
-          });
+          if (isDebit) {
+            // For debit transactions, train supplier mapping using learnMapping
+            SupplierMappingService.learnMapping(transaction.partyName, correctedName).catch(err => {
+              console.error('Error training supplier mapping:', err);
+            });
+          } else {
+            // For credit transactions, train party mapping
+            PartyMappingService.autoTrainFromNarration(finalTransaction.description, correctedName).catch(err => {
+              console.error('Error training party mapping:', err);
+            });
+          }
         }
         
-        // Update party balance (still uses local storage for parties - can be migrated later)
+        // Update party/supplier balance (still uses local storage - can be migrated later)
         StorageService.updatePartyBalance(
           correctedName,
           finalTransaction.amount,
@@ -243,44 +260,95 @@ export function CSVUpload() {
           const result = await saveTransactionsToSheets(savedTransactions);
           if (result.failed > 0) {
             const sheetsURL = getGoogleSheetsURL();
-            alert(
-              `Successfully imported ${parsedTransactions.length} transactions!\n\n` +
-              `⚠️ Google Sheets: ${result.success} sent, ${result.failed} failed.\n\n` +
-              `If you see 401 errors in the console, the script needs authorization:\n` +
-              `1. Open: ${sheetsURL}\n` +
-              `2. Sign in and authorize the script\n` +
-              `3. Check your Google Sheet to verify data was saved`
-            );
+            const message = `⚠️ IMPORT ISSUE\n\n` +
+              `Parsed: ${parsedTransactions.length} transactions\n` +
+              `Sent: ${result.success}\n` +
+              `Failed: ${result.failed}\n\n` +
+              `The script needs authorization to save transactions.\n\n` +
+              `AUTHORIZATION URL:\n${sheetsURL}\n\n` +
+              `Steps:\n` +
+              `1. Copy the URL above (it's also shown in browser console)\n` +
+              `2. Open it in a new tab\n` +
+              `3. Sign in with your Google account\n` +
+              `4. Click "Review Permissions" or "Allow"\n` +
+              `5. Authorize the script\n` +
+              `6. Try uploading again\n\n` +
+              `After authorization, transactions will be saved automatically.`;
+            
+            console.error('❌ Authorization Required');
+            console.error('📋 COPY THIS URL TO AUTHORIZE:');
+            console.error(sheetsURL);
+            console.error('\nSteps:');
+            console.error('1. Copy the URL above');
+            console.error('2. Open it in a new tab');
+            console.error('3. Sign in and authorize');
+            console.error('4. Try uploading again');
+            
+            // Show modal with URL for easy copying
+            setAuthURL(sheetsURL);
+            setShowAuthModal(true);
           } else {
-            alert(
-              `Successfully imported ${parsedTransactions.length} transactions!\n\n` +
-              `✓ All transactions sent to Google Sheets.\n` +
-              `Note: If you see 401 errors, please authorize the script first.`
-            );
+            const creditCount = savedTransactions.filter(t => t.type === 'credit' || !t.type).length;
+            const debitCount = savedTransactions.filter(t => t.type === 'debit').length;
+            let message = `Successfully imported ${parsedTransactions.length} transactions!\n\n`;
+            message += `✓ All transactions sent to database.\n`;
+            if (creditCount > 0) {
+              message += `- ${creditCount} credit transaction(s) saved to Transactions sheet\n`;
+            }
+            if (debitCount > 0) {
+              message += `- ${debitCount} debit transaction(s) saved to DebitTransactions sheet\n`;
+            }
+            alert(message);
           }
         } catch (sheetsError) {
-          console.error("Error saving to Google Sheets:", sheetsError);
-          const errorMessage = sheetsError instanceof Error ? sheetsError.message : 'Unknown error';
+          console.error("Error saving to database:", sheetsError);
+          const errorMessage = sheetsError instanceof Error ? sheetsError.message : String(sheetsError);
+          const errorString = String(sheetsError);
           const sheetsURL = getGoogleSheetsURL();
           
-          if (errorMessage.includes('authorization') || errorMessage.includes('401')) {
-            alert(
-              `Successfully imported ${parsedTransactions.length} transactions!\n\n` +
-              `⚠️ Google Sheets Error: Script requires authorization (401 error).\n\n` +
-              `Please:\n` +
-              `1. Open this URL in your browser:\n${sheetsURL}\n` +
-              `2. Sign in with your Google account\n` +
-              `3. Click "Review Permissions" or "Allow"\n` +
-              `4. Authorize the script\n` +
-              `5. Try uploading again\n\n` +
-              `After authorization, transactions will be saved automatically.`
-            );
+          // Log detailed error for debugging
+          console.error("Detailed error:", {
+            error: sheetsError,
+            message: errorMessage,
+            errorString: errorString,
+            transactionsCount: savedTransactions.length,
+            creditCount: savedTransactions.filter(t => t.type === 'credit' || !t.type).length,
+            debitCount: savedTransactions.filter(t => t.type === 'debit').length
+          });
+          
+          // Check for authorization errors (more specific check)
+          const isAuthError = errorString.toLowerCase().includes('authorization') || 
+                             errorString.toLowerCase().includes('401') ||
+                             errorString.toLowerCase().includes('unauthorized') ||
+                             errorMessage.toLowerCase().includes('authorization') ||
+                             errorMessage.toLowerCase().includes('401') ||
+                             errorMessage.toLowerCase().includes('unauthorized');
+          
+          if (isAuthError) {
+            console.error('❌ Authorization Required');
+            console.error('📋 COPY THIS URL TO AUTHORIZE:');
+            console.error(sheetsURL);
+            console.error('\nSteps:');
+            console.error('1. Copy the URL above');
+            console.error('2. Open it in a new tab');
+            console.error('3. Sign in and authorize');
+            console.error('4. Try uploading again');
+            
+            // Show modal with URL for easy copying
+            setAuthURL(sheetsURL);
+            setShowAuthModal(true);
           } else {
+            // Show actual error, not authorization error
             alert(
-              `Successfully imported ${parsedTransactions.length} transactions!\n\n` +
-              `⚠️ Warning: Failed to save to Google Sheets.\n` +
+              `⚠️ Failed to Save to Database\n\n` +
               `Error: ${errorMessage}\n\n` +
-              `Please check the browser console for details.`
+              `Transactions were parsed but not saved.\n` +
+              `Please check:\n` +
+              `1. Browser console (F12) for detailed errors\n` +
+              `2. Google Apps Script is deployed correctly\n` +
+              `3. Sheet names are correct (Transactions, DebitTransactions)\n` +
+              `4. Google Apps Script logs (Executions tab)\n\n` +
+              `Error details are in the browser console.`
             );
           }
         }
@@ -298,7 +366,24 @@ export function CSVUpload() {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
-      navigate("/transactions");
+      
+      // Navigate to the appropriate page based on transaction types
+      const creditCount = savedTransactions.filter(t => t.type === 'credit' || !t.type).length;
+      const debitCount = savedTransactions.filter(t => t.type === 'debit').length;
+      
+      if (debitCount > 0 && creditCount === 0) {
+        // Only debit transactions - go to debit transactions page
+        navigate("/debit-transactions");
+      } else if (creditCount > 0 && debitCount === 0) {
+        // Only credit transactions - go to credit transactions page
+        navigate("/transactions");
+      } else if (debitCount > creditCount) {
+        // More debit transactions - go to debit transactions page
+        navigate("/debit-transactions");
+      } else {
+        // More credit transactions or equal - go to credit transactions page
+        navigate("/transactions");
+      }
     } catch (err) {
       console.error("Error saving transactions:", err);
       alert("Failed to save transactions. Please try again.");
@@ -321,9 +406,10 @@ export function CSVUpload() {
     try {
       const result = await testGoogleSheetsConnection();
       if (result.success) {
-        alert('✓ Database connection test successful!');
+        alert('✓ Database connection test successful!\n\nThe connection is working. You can now upload transactions.');
       } else {
-        alert(`✗ Database connection failed:\n\n${result.error}\n\nPlease check:\n1. Script is deployed as Web App\n2. "Who has access" is set to "Anyone"\n3. Script is authorized`);
+        const sheetsURL = getGoogleSheetsURL();
+        alert(`✗ Database connection failed:\n\n${result.error}\n\nPlease check:\n1. Script is deployed as Web App\n2. "Who has access" is set to "Anyone"\n3. Script is authorized\n\nIf you see authorization errors, open this URL:\n${sheetsURL}\n\nThen click "Review Permissions" or "Allow" to authorize the script.`);
       }
     } catch (error) {
       alert(`✗ Test failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -660,6 +746,86 @@ export function CSVUpload() {
           )}
         </CardContent>
       </Card>
+
+      {/* Authorization URL Modal */}
+      <Modal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        title="Authorization Required"
+      >
+        <div className="space-y-3">
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            The database script needs authorization. Copy the URL below and authorize it.
+          </p>
+          
+          <div className="space-y-1.5">
+            <Label htmlFor="auth-url" className="text-xs font-medium">Authorization URL:</Label>
+            <div className="flex gap-1.5">
+              <Input
+                id="auth-url"
+                value={authURL}
+                readOnly
+                className="font-mono text-xs h-8"
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(authURL);
+                  alert('URL copied!');
+                }}
+                title="Copy URL"
+                className="h-8 px-2"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  window.open(authURL, '_blank');
+                }}
+                title="Open URL"
+                className="h-8 px-2"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-xs font-semibold text-blue-900 mb-1.5">Steps:</p>
+            <ol className="text-xs text-blue-800 space-y-0.5 list-decimal list-inside">
+              <li>Copy the URL (or click copy button)</li>
+              <li>Open it in a new tab</li>
+              <li>Sign in and authorize</li>
+              <li>Try uploading again</li>
+            </ol>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                window.open(authURL, '_blank');
+                setShowAuthModal(false);
+              }}
+              className="text-xs h-8"
+            >
+              Open URL
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setShowAuthModal(false)}
+              className="btn-gradient text-xs h-8"
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
