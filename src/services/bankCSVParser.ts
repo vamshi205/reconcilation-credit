@@ -1,6 +1,7 @@
 import Papa from "papaparse";
 import { Transaction } from "../types/transaction";
 import { generateId } from "../lib/utils";
+import { getBankConfig, BankConfig } from "./bankConfig";
 
 export interface BankCSVRow {
   Date?: string;
@@ -23,9 +24,17 @@ export class BankCSVParser {
    * Date, Narration, Chq./Ref.No., Value Dt, Withdrawal Amt., Deposit Amt., Closing Balance
    * @param file - The CSV file to parse
    * @param transactionType - 'credit', 'debit', or 'both' to filter transactions
+   * @param bankName - Bank name (e.g., 'HDFC', 'Canara') to use appropriate column mappings
    */
-  static parseFile(file: File, transactionType: 'credit' | 'debit' | 'both' = 'credit'): Promise<Transaction[]> {
+  static parseFile(file: File, transactionType: 'credit' | 'debit' | 'both' = 'credit', bankName: string = 'HDFC'): Promise<Transaction[]> {
     return new Promise((resolve, reject) => {
+      // Get bank configuration
+      const bankConfig = getBankConfig(bankName);
+      if (!bankConfig) {
+        reject(new Error(`Unknown bank: ${bankName}. Supported banks: HDFC, Canara`));
+        return;
+      }
+
       // First, read the file as text to find the header row
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -35,63 +44,96 @@ export class BankCSVParser {
           return;
         }
 
-        // Find the header row (contains "Date", "Narration", "Deposit Amt.")
+        // Find the header row using bank-specific patterns
         const lines = text.split("\n");
         let headerRowIndex = -1;
         let headerRow = "";
-
-        for (let i = 0; i < Math.min(50, lines.length); i++) {
-          const line = lines[i].toLowerCase();
+        
+        const maxSearchRows = bankConfig.maxHeaderSearchRows || 50;
+        
+        // If bank has a header row hint, check that row first
+        if (bankConfig.headerRowHint !== undefined && bankConfig.headerRowHint < lines.length) {
+          const hintIndex = bankConfig.headerRowHint;
+          const hintLine = lines[hintIndex].toLowerCase();
+          const hintColumns = hintLine.split(",");
           
-          // Skip metadata rows
-          if (
-            line.includes("page no") ||
-            line.includes("statement of account") ||
-            line.includes("statement of accounts") ||
-            line.includes("account statement") ||
-            (line.includes("hdfc") && line.length < 100) ||
-            line.match(/^[a-z\s]+bank/i)
-          ) {
-            continue;
+          if (hintColumns.length >= 3) {
+            const hasDate = bankConfig.dateColumns.some(col => hintLine.includes(col.toLowerCase()));
+            const hasNarration = bankConfig.narrationColumns.some(col => hintLine.includes(col.toLowerCase()));
+            const hasAmount = bankConfig.depositColumns.some(col => hintLine.includes(col.toLowerCase())) ||
+                             bankConfig.withdrawalColumns.some(col => hintLine.includes(col.toLowerCase())) ||
+                             hintLine.includes("amount");
+            
+            if (hasDate && hasNarration && hasAmount) {
+              // Verify next line looks like data
+              if (hintIndex + 1 < lines.length) {
+                const nextLine = lines[hintIndex + 1].toLowerCase();
+                if (!nextLine.includes("date") && !bankConfig.skipPatterns.some(p => p.test(nextLine))) {
+                  headerRowIndex = hintIndex;
+                  headerRow = lines[hintIndex];
+                  console.log(`Found header at hint row ${hintIndex + 1} (line ${hintIndex + 1}) for ${bankConfig.name}`);
+                }
+              } else {
+                headerRowIndex = hintIndex;
+                headerRow = lines[hintIndex];
+                console.log(`Found header at hint row ${hintIndex + 1} (line ${hintIndex + 1}) for ${bankConfig.name}`);
+              }
+            }
           }
-          
-          // Check if line has multiple columns (split by comma)
-          const columns = line.split(",");
-          if (columns.length < 3) continue; // Headers should have multiple columns
-          
-          // Look for actual header row
-          if (
-            line.includes("date") &&
-            (line.includes("narration") || line.includes("description") || line.includes("particulars")) &&
-            (line.includes("deposit") || line.includes("withdrawal") || 
-             line.includes("credit") || line.includes("debit") ||
-             line.includes("amount"))
-          ) {
-            // Verify next line looks like data, not another header
-            if (i + 1 < lines.length) {
-              const nextLine = lines[i + 1].toLowerCase();
-              if (!nextLine.includes("date") && !nextLine.includes("page no")) {
+        }
+
+        // If not found at hint, search from beginning
+        if (headerRowIndex === -1) {
+          for (let i = 0; i < Math.min(maxSearchRows, lines.length); i++) {
+            const line = lines[i].toLowerCase();
+            
+            // Skip metadata rows using bank-specific skip patterns
+            const shouldSkip = bankConfig.skipPatterns.some(pattern => pattern.test(line));
+            if (shouldSkip) {
+              continue;
+            }
+            
+            // Check if line has multiple columns (split by comma)
+            const columns = line.split(",");
+            if (columns.length < 3) continue; // Headers should have multiple columns
+            
+            // Look for actual header row using bank-specific column names
+            const hasDate = bankConfig.dateColumns.some(col => line.includes(col.toLowerCase()));
+            const hasNarration = bankConfig.narrationColumns.some(col => line.includes(col.toLowerCase()));
+            const hasAmount = bankConfig.depositColumns.some(col => line.includes(col.toLowerCase())) ||
+                             bankConfig.withdrawalColumns.some(col => line.includes(col.toLowerCase())) ||
+                             line.includes("amount");
+            
+            if (hasDate && hasNarration && hasAmount) {
+              // Verify next line looks like data, not another header
+              if (i + 1 < lines.length) {
+                const nextLine = lines[i + 1].toLowerCase();
+                if (!nextLine.includes("date") && !bankConfig.skipPatterns.some(p => p.test(nextLine))) {
+                  headerRowIndex = i;
+                  headerRow = lines[i];
+                  console.log(`Found header at row ${i + 1} (line ${i + 1}) for ${bankConfig.name}`);
+                  break;
+                }
+              } else {
                 headerRowIndex = i;
                 headerRow = lines[i];
+                console.log(`Found header at row ${i + 1} (line ${i + 1}) for ${bankConfig.name}`);
                 break;
               }
-            } else {
-              headerRowIndex = i;
-              headerRow = lines[i];
-              break;
             }
           }
         }
 
         if (headerRowIndex === -1) {
           // Try a more lenient search
-          for (let i = 0; i < Math.min(50, lines.length); i++) {
+          for (let i = 0; i < Math.min(maxSearchRows, lines.length); i++) {
             const line = lines[i].toLowerCase();
             const columns = line.split(",");
             if (columns.length >= 5) {
               if (line.includes("date") || line.includes("narration") || line.includes("amount")) {
                 headerRowIndex = i;
                 headerRow = lines[i];
+                console.log(`Found header at row ${i + 1} (line ${i + 1}) using lenient search for ${bankConfig.name}`);
                 break;
               }
             }
@@ -172,21 +214,33 @@ export class BankCSVParser {
                 return;
               }
 
-              const transactions = this.parseRows(validRows as BankCSVRow[], transactionType);
+              const transactions = this.parseRows(validRows as BankCSVRow[], transactionType, bankConfig);
 
               if (transactions.length === 0) {
-                // Provide more helpful error message
+                // Provide more helpful error message with bank-specific info
                 const sampleRow = validRows[0] as any;
                 const availableColumns = sampleRow
                   ? Object.keys(sampleRow).join(", ")
                   : "none";
                 console.log("Sample row:", sampleRow);
+                
+                // Get bank-specific column names for error message
+                const depositColName = bankConfig.depositColumns[0] || "Deposit/Credit";
+                const withdrawalColName = bankConfig.withdrawalColumns[0] || "Withdrawal/Debit";
+                
+                const typeMessage = transactionType === 'credit' 
+                  ? `${depositColName}`
+                  : transactionType === 'debit'
+                  ? `${withdrawalColName}`
+                  : `${depositColName} or ${withdrawalColName}`;
+                
                 reject(
                   new Error(
-                    `No deposit transactions found. Only rows with Deposit Amt. > 0 are processed.\n\n` +
+                    `No ${transactionType === 'credit' ? 'credit' : transactionType === 'debit' ? 'debit' : ''} transactions found. Only rows with ${typeMessage} > 0 are processed.\n\n` +
                     `Found columns: ${availableColumns}\n` +
                     `Sample row values: ${JSON.stringify(sampleRow)}\n` +
-                    `Please check that the Deposit Amt. column has values > 0.`
+                    `Please check that the ${typeMessage} column has values > 0.\n` +
+                    `Bank: ${bankConfig.name}`
                   )
                 );
                 return;
@@ -219,7 +273,7 @@ export class BankCSVParser {
     });
   }
 
-  static parseRows(rows: BankCSVRow[], transactionType: 'credit' | 'debit' | 'both' = 'credit'): Transaction[] {
+  static parseRows(rows: BankCSVRow[], transactionType: 'credit' | 'debit' | 'both' = 'credit', bankConfig: BankConfig): Transaction[] {
     const transactions: Transaction[] = [];
 
     // Debug: Log first row to see structure
@@ -230,7 +284,7 @@ export class BankCSVParser {
 
     rows.forEach((row, index) => {
       try {
-        const transaction = this.parseRow(row, index, transactionType);
+        const transaction = this.parseRow(row, index, transactionType, bankConfig);
         if (transaction) {
           transactions.push(transaction);
         }
@@ -243,23 +297,34 @@ export class BankCSVParser {
     return transactions;
   }
 
-  static parseRow(row: BankCSVRow, index: number, transactionType: 'credit' | 'debit' | 'both' = 'credit'): Transaction | null {
+  static parseRow(row: BankCSVRow, index: number, transactionType: 'credit' | 'debit' | 'both' = 'credit', bankConfig: BankConfig): Transaction | null {
     // Use flexible column matching (case-insensitive, handles variations)
     const rowKeys = Object.keys(row);
     const rowLower = Object.fromEntries(
       rowKeys.map((k) => [k.toLowerCase().trim(), row[k]])
     );
+    
+    // Debug: Log first few rows structure
+    if (index < 3) {
+      console.log(`\n=== Parsing Row ${index + 1} ===`);
+      console.log(`Row keys:`, rowKeys);
+      console.log(`Row values:`, Object.fromEntries(rowKeys.map(k => [k, row[k]])));
+      console.log(`Looking for deposit columns:`, bankConfig.depositColumns);
+      console.log(`Looking for withdrawal columns:`, bankConfig.withdrawalColumns);
+    }
 
-    // Find narration column first to check for summary/total rows
+    // Find narration column using bank config
     let narration = "";
     for (const key of rowKeys) {
       const keyLower = key.toLowerCase().trim();
-      if (keyLower.includes("narration") || keyLower.includes("description")) {
+      const matchesNarration = bankConfig.narrationColumns.some(col => keyLower.includes(col.toLowerCase()));
+      if (matchesNarration) {
         narration = String(row[key] || "").trim();
         break;
       }
     }
     if (!narration) {
+      // Fallback: try common narration columns
       narration = String(rowLower["narration"] || rowLower["description"] || "").trim();
     }
 
@@ -287,27 +352,35 @@ export class BankCSVParser {
       return null;
     }
 
-    // Find date column (flexible matching)
+    // Find date column using bank config
     let dateStr = "";
     for (const key of rowKeys) {
       const keyLower = key.toLowerCase().trim();
-      if (
-        keyLower.includes("date") &&
-        !keyLower.includes("value") &&
-        !keyLower.includes("closing")
-      ) {
+      const matchesDate = bankConfig.dateColumns.some(col => {
+        const colLower = col.toLowerCase();
+        return keyLower.includes(colLower) && !keyLower.includes("value") && !keyLower.includes("closing");
+      });
+      if (matchesDate) {
         dateStr = String(row[key] || "");
         break;
       }
     }
     if (!dateStr) {
-      dateStr = String(
-        rowLower["date"] ||
-        rowLower["transaction date"] ||
-        rowLower["value dt"] ||
-        rowLower["value date"] ||
-        ""
-      );
+      // Fallback: try common date columns
+      for (const dateCol of bankConfig.dateColumns) {
+        const colLower = dateCol.toLowerCase();
+        if (rowLower[colLower]) {
+          dateStr = String(rowLower[colLower]);
+          break;
+        }
+      }
+      if (!dateStr) {
+        dateStr = String(
+          rowLower["date"] ||
+          rowLower["transaction date"] ||
+          ""
+        );
+      }
     }
 
     if (!dateStr || dateStr === "undefined" || dateStr === "null" || dateStr.trim() === "") {
@@ -327,85 +400,154 @@ export class BankCSVParser {
       return null;
     }
 
-    // Find deposit/credit amount column (flexible matching)
+    // Find deposit/credit amount column using bank config
     let depositAmtStr = "";
-    for (const key of rowKeys) {
-      const keyLower = key.toLowerCase().trim();
-      if (
-        (keyLower.includes("deposit") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
-        keyLower === "deposit amt." ||
-        keyLower === "deposit amt" ||
-        keyLower === "deposit amount" ||
-        keyLower === "deposit" ||
-        (keyLower.includes("credit") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
-        keyLower === "credit amt." ||
-        keyLower === "credit amt" ||
-        keyLower === "credit amount" ||
-        keyLower === "credit" ||
-        keyLower === "cr"
-      ) {
-        depositAmtStr = String(row[key] || "0");
-        break;
+    let depositColumnFound = false;
+    
+    // First, try to find exact column name match
+    for (const depositCol of bankConfig.depositColumns) {
+      const colLower = depositCol.toLowerCase().trim();
+      // Try exact key match first (case-insensitive)
+      const exactKey = rowKeys.find(k => k.toLowerCase().trim() === colLower);
+      if (exactKey) {
+        const value = row[exactKey];
+        if (value !== undefined && value !== null && String(value).trim() !== "") {
+          depositAmtStr = String(value).trim();
+          depositColumnFound = true;
+          if (index < 3) {
+            console.log(`✓ Found deposit column "${exactKey}" (exact match) with value: "${depositAmtStr}"`);
+          }
+          break;
+        }
       }
     }
-    if (!depositAmtStr) {
-      depositAmtStr = String(
-        rowLower["deposit amt."] ||
-        rowLower["deposit amt"] ||
-        rowLower["deposit amount"] ||
-        rowLower["deposit"] ||
-        rowLower["credit amt."] ||
-        rowLower["credit amt"] ||
-        rowLower["credit amount"] ||
-        rowLower["credit"] ||
-        rowLower["cr"] ||
-        "0"
-      );
+    
+    // If not found, try contains match
+    if (!depositColumnFound) {
+      for (const key of rowKeys) {
+        const keyLower = key.toLowerCase().trim();
+        const matchesDeposit = bankConfig.depositColumns.some(col => {
+          const colLower = col.toLowerCase().trim();
+          // Try exact match first, then contains match
+          return keyLower === colLower || keyLower.includes(colLower);
+        });
+        if (matchesDeposit) {
+          const value = row[key];
+          if (value !== undefined && value !== null && String(value).trim() !== "") {
+            depositAmtStr = String(value).trim();
+            depositColumnFound = true;
+            if (index < 3) {
+              console.log(`✓ Found deposit column "${key}" (contains match) with value: "${depositAmtStr}"`);
+            }
+            break;
+          }
+        }
+      }
+    }
+    
+    // Fallback: try lowercase lookup in rowLower
+    if (!depositColumnFound) {
+      for (const depositCol of bankConfig.depositColumns) {
+        const colLower = depositCol.toLowerCase().trim();
+        if (rowLower[colLower]) {
+          const value = String(rowLower[colLower]).trim();
+          if (value !== "" && value !== "undefined" && value !== "null") {
+            depositAmtStr = value;
+            depositColumnFound = true;
+            if (index < 3) {
+              console.log(`✓ Found deposit column "${colLower}" (lowercase fallback) with value: "${depositAmtStr}"`);
+            }
+            break;
+          }
+        }
+      }
+    }
+    
+    if (!depositColumnFound || depositAmtStr === "") {
+      depositAmtStr = "0";
+      if (index < 3) {
+        console.log(`✗ No deposit column found. Available columns: ${rowKeys.join(", ")}`);
+      }
     }
 
     const depositAmount = this.parseAmount(depositAmtStr);
 
-    // Find withdrawal/debit amount column (flexible matching)
+    // Find withdrawal/debit amount column using bank config
     let withdrawalAmtStr = "";
-    for (const key of rowKeys) {
-      const keyLower = key.toLowerCase().trim();
-      if (
-        (keyLower.includes("withdrawal") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
-        keyLower === "withdrawal amt." ||
-        keyLower === "withdrawal amt" ||
-        keyLower === "withdrawal amount" ||
-        keyLower === "withdrawal" ||
-        (keyLower.includes("debit") && (keyLower.includes("amt") || keyLower.includes("amount"))) ||
-        keyLower === "debit amt." ||
-        keyLower === "debit amt" ||
-        keyLower === "debit amount" ||
-        keyLower === "debit" ||
-        keyLower === "dr"
-      ) {
-        withdrawalAmtStr = String(row[key] || "0");
-        break;
+    let withdrawalColumnFound = false;
+    
+    // First, try to find exact column name match
+    for (const withdrawalCol of bankConfig.withdrawalColumns) {
+      const colLower = withdrawalCol.toLowerCase().trim();
+      // Try exact key match first (case-insensitive)
+      const exactKey = rowKeys.find(k => k.toLowerCase().trim() === colLower);
+      if (exactKey) {
+        const value = row[exactKey];
+        if (value !== undefined && value !== null && String(value).trim() !== "") {
+          withdrawalAmtStr = String(value).trim();
+          withdrawalColumnFound = true;
+          if (index < 3) {
+            console.log(`✓ Found withdrawal column "${exactKey}" (exact match) with value: "${withdrawalAmtStr}"`);
+          }
+          break;
+        }
       }
     }
-    if (!withdrawalAmtStr) {
-      withdrawalAmtStr = String(
-        rowLower["withdrawal amt."] ||
-        rowLower["withdrawal amt"] ||
-        rowLower["withdrawal amount"] ||
-        rowLower["withdrawal"] ||
-        rowLower["debit amt."] ||
-        rowLower["debit amt"] ||
-        rowLower["debit amount"] ||
-        rowLower["debit"] ||
-        rowLower["dr"] ||
-        "0"
-      );
+    
+    // If not found, try contains match
+    if (!withdrawalColumnFound) {
+      for (const key of rowKeys) {
+        const keyLower = key.toLowerCase().trim();
+        const matchesWithdrawal = bankConfig.withdrawalColumns.some(col => {
+          const colLower = col.toLowerCase().trim();
+          // Try exact match first, then contains match
+          return keyLower === colLower || keyLower.includes(colLower);
+        });
+        if (matchesWithdrawal) {
+          const value = row[key];
+          if (value !== undefined && value !== null && String(value).trim() !== "") {
+            withdrawalAmtStr = String(value).trim();
+            withdrawalColumnFound = true;
+            if (index < 3) {
+              console.log(`✓ Found withdrawal column "${key}" (contains match) with value: "${withdrawalAmtStr}"`);
+            }
+            break;
+          }
+        }
+      }
+    }
+    
+    // Fallback: try lowercase lookup in rowLower
+    if (!withdrawalColumnFound) {
+      for (const withdrawalCol of bankConfig.withdrawalColumns) {
+        const colLower = withdrawalCol.toLowerCase().trim();
+        if (rowLower[colLower]) {
+          const value = String(rowLower[colLower]).trim();
+          if (value !== "" && value !== "undefined" && value !== "null") {
+            withdrawalAmtStr = value;
+            withdrawalColumnFound = true;
+            if (index < 3) {
+              console.log(`✓ Found withdrawal column "${colLower}" (lowercase fallback) with value: "${withdrawalAmtStr}"`);
+            }
+            break;
+          }
+        }
+      }
+    }
+    
+    if (!withdrawalColumnFound || withdrawalAmtStr === "") {
+      withdrawalAmtStr = "0";
+      if (index < 3) {
+        console.log(`✗ No withdrawal column found. Available columns: ${rowKeys.join(", ")}`);
+      }
     }
 
     const withdrawalAmount = this.parseAmount(withdrawalAmtStr);
 
     // Debug first few rows
     if (index < 3) {
-      console.log(`Row ${index + 1}: Deposit amount: "${depositAmtStr}" = ${depositAmount}, Withdrawal amount: "${withdrawalAmtStr}" = ${withdrawalAmount}`);
+      console.log(`Row ${index + 1}: Deposit column value: "${depositAmtStr}" -> parsed: ${depositAmount}, Withdrawal column value: "${withdrawalAmtStr}" -> parsed: ${withdrawalAmount}`);
+      console.log(`Row ${index + 1}: Available columns:`, rowKeys);
     }
 
     // Determine transaction type and amount based on filter
@@ -428,40 +570,56 @@ export class BankCSVParser {
       amount = withdrawalAmount;
       type = 'debit';
     } else {
-      return null; // Skip rows with no amount
+      // Skip rows with no amount
+      if (index < 3) {
+        console.log(`Row ${index + 1}: Skipping - no valid amount found (deposit: ${depositAmount}, withdrawal: ${withdrawalAmount})`);
+      }
+      return null;
     }
 
     // Filter based on transactionType parameter
     if (transactionType === 'credit' && type !== 'credit') {
+      if (index < 3) {
+        console.log(`Row ${index + 1}: Filtered out - transaction type is ${type} but filter is ${transactionType}`);
+      }
       return null;
     }
     if (transactionType === 'debit' && type !== 'debit') {
+      if (index < 3) {
+        console.log(`Row ${index + 1}: Filtered out - transaction type is ${type} but filter is ${transactionType}`);
+      }
       return null;
+    }
+    
+    if (index < 3) {
+      console.log(`Row ${index + 1}: ✓ Processing as ${type} transaction with amount ${amount}`);
     }
 
     // Narration is already found above (used for summary row check)
     // No need to find it again
 
-    // Find reference number column (flexible matching)
+    // Find reference number column using bank config
     let referenceNumber = "";
     for (const key of rowKeys) {
       const keyLower = key.toLowerCase().trim();
-      if (
-        keyLower.includes("ref") ||
-        keyLower.includes("chq") ||
-        keyLower.includes("cheque")
-      ) {
-        referenceNumber = String(row[key] || "");
+      const matchesReference = bankConfig.referenceColumns.some(col => {
+        const colLower = col.toLowerCase();
+        return keyLower.includes(colLower) || keyLower === colLower;
+      });
+      if (matchesReference) {
+        referenceNumber = String(row[key] || "").trim();
         break;
       }
     }
     if (!referenceNumber) {
-      referenceNumber = String(
-        rowLower["chq./ref.no."] ||
-        rowLower["chq/ref.no."] ||
-        rowLower["ref no"] ||
-        ""
-      );
+      // Fallback: try bank config columns
+      for (const refCol of bankConfig.referenceColumns) {
+        const colLower = refCol.toLowerCase();
+        if (rowLower[colLower]) {
+          referenceNumber = String(rowLower[colLower] || "").trim();
+          break;
+        }
+      }
     }
 
     // Leave party name blank - user will enter it manually and system will learn
@@ -552,6 +710,9 @@ export class BankCSVParser {
     if (cleaned === "" || cleaned === "-" || cleaned === "—") {
       return 0;
     }
+
+    // Handle Excel formula format: ="19,734.00" or =19,734.00
+    cleaned = cleaned.replace(/^=\s*"?([^"]+)"?$/, "$1");
 
     // Remove currency symbols, commas, spaces, and other formatting
     cleaned = cleaned

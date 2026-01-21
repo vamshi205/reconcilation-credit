@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { Transaction } from "../types/transaction";
 import { StorageService } from "../services/storageService";
 import { SupplierMappingService } from "../services/supplierMappingService";
-import { fetchDebitTransactionsFromSheets, isGoogleSheetsConfigured } from "../services/googleSheetsService";
+import { fetchDebitTransactionsFromSheets, fetchDebitTransactionsFromBank, isGoogleSheetsConfigured } from "../services/googleSheetsService";
 import { AuthService } from "../services/authService";
 import { formatDate } from "../lib/utils";
 import { DatePicker } from "../components/ui/DatePicker";
@@ -11,10 +11,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card"
 import { Input } from "../components/ui/Input";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Button } from "../components/ui/Button";
+import { Select } from "../components/ui/Select";
 import { Search, CheckCircle2, X, Edit2, Check, XCircle, Sparkles, RefreshCw, Pencil, List, Grid, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Clock, Printer, LogOut } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Label } from "../components/ui/Label";
 import { Modal } from "../components/ui/Modal";
+import { getAvailableBanks } from "../services/bankConfig";
 
 type ViewType = "pending" | "completed" | "hold" | "selfTransfer";
 
@@ -24,6 +26,8 @@ export function DebitTransactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [view, setView] = useState<ViewType>("pending");
+  const [selectedBank, setSelectedBank] = useState<string>("HDFC"); // Default to HDFC for backward compatibility
+  const availableBanks = getAvailableBanks();
   
   // Check for supplier name and view in URL query params
   useEffect(() => {
@@ -65,6 +69,7 @@ export function DebitTransactions() {
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const focusedInputId = useRef<string | null>(null);
   const isLoadingRef = useRef<boolean>(false); // Track loading state to prevent concurrent loads
+  const hasLoadedOnceRef = useRef<boolean>(false); // Track if we've loaded at least once
   const loadingSuggestionsRef = useRef<Set<string>>(new Set()); // Track which transactions are loading suggestions
   // State for editing party names
   const [editingPartyName, setEditingPartyName] = useState<string | null>(null);
@@ -111,20 +116,25 @@ export function DebitTransactions() {
   const [modalSuggestions, setModalSuggestions] = useState<string[]>([]);
 
   // Load transactions from Google Sheets (single source of truth - no local storage fallback)
-  const loadTransactions = useCallback(async () => {
+  const loadTransactions = useCallback(async (bankOverride?: string) => {
     // Don't reload if user is currently typing in an input
     if (focusedInputId.current !== null) {
       return;
     }
     
-    // Prevent concurrent loads
-    if (isLoadingRef.current) {
-      console.log('Load already in progress, skipping...');
-      return;
-    }
-    
+    // Always set loading state (even if already loading, we want to show the loading bar)
     isLoadingRef.current = true;
     setIsLoading(true);
+    
+    // Use bankOverride if provided, otherwise use current selectedBank
+    // IMPORTANT: bankOverride takes precedence to avoid closure issues
+    const currentSelectedBank = bankOverride !== undefined && bankOverride !== null ? bankOverride : selectedBank;
+    console.log('🚀 loadTransactions START (Debit) - selectedBank state:', selectedBank, 'bankOverride param:', bankOverride, 'final using:', currentSelectedBank);
+    
+    // Validate that we're using the correct bank
+    if (bankOverride && bankOverride !== currentSelectedBank) {
+      console.error('❌ ERROR: bankOverride mismatch! bankOverride:', bankOverride, 'currentSelectedBank:', currentSelectedBank);
+    }
     
     try {
       let allTransactions: Transaction[] = [];
@@ -132,11 +142,39 @@ export function DebitTransactions() {
       // ALWAYS fetch from Google Sheets (single source of truth)
       if (isGoogleSheetsConfigured()) {
         try {
-          const sheetsTransactions = await fetchDebitTransactionsFromSheets();
+          // Fetch based on selected bank
+          console.log('🔍 About to fetch (Debit) - currentSelectedBank:', currentSelectedBank);
+          let sheetsTransactions: Transaction[] = [];
+          if (currentSelectedBank === 'HDFC' || currentSelectedBank === 'all') {
+            // Use original function for HDFC (backward compatibility)
+            console.log('📥 Using fetchDebitTransactionsFromSheets() for HDFC/legacy');
+            sheetsTransactions = await fetchDebitTransactionsFromSheets();
+          } else {
+            // Fetch from specific bank
+            console.log(`📥 Using fetchDebitTransactionsFromBank('${currentSelectedBank}') for bank-specific fetch`);
+            sheetsTransactions = await fetchDebitTransactionsFromBank(currentSelectedBank);
+          }
           // Always use what's in Google Sheets, even if empty
           allTransactions = sheetsTransactions;
           setLastSyncTime(new Date());
-          console.log(`Loaded ${sheetsTransactions.length} debit transactions from Google Sheets`);
+          console.log(`Loaded ${sheetsTransactions.length} debit transactions from ${currentSelectedBank === 'all' ? 'all banks' : currentSelectedBank} Google Sheets`);
+          
+          // Debug: Log transaction banks for Canara
+          if (currentSelectedBank === 'Canara') {
+            console.log('=== CANARA DEBUG (Debit) ===');
+            console.log('Selected bank:', currentSelectedBank);
+            console.log('Fetched transactions count:', sheetsTransactions.length);
+            if (sheetsTransactions.length > 0) {
+              console.log('First 3 transactions:', sheetsTransactions.slice(0, 3).map(t => ({
+                id: t.id,
+                description: t.description,
+                bank: t.bank,
+                amount: t.amount
+              })));
+              console.log('All unique banks in transactions:', [...new Set(sheetsTransactions.map(t => t.bank || 'undefined'))]);
+            }
+            console.log('===================');
+          }
         } catch (error) {
           console.error('Error fetching from Google Sheets:', error);
           // On error, show empty list (don't fallback to local storage)
@@ -228,8 +266,12 @@ export function DebitTransactions() {
   useEffect(() => {
     // Initial load only - no auto-refresh
     // User must manually click refresh button to reload data
-    loadTransactions();
-  }, [loadTransactions]);
+    // Don't reload when selectedBank changes - onChange handler will call loadTransactions with the new bank
+    if (!hasLoadedOnceRef.current) {
+      hasLoadedOnceRef.current = true;
+      loadTransactions();
+    }
+  }, []); // Only run on mount
 
   // Filter transactions based on view, date, and search
   const filteredTransactions = useMemo(() => {
@@ -290,6 +332,23 @@ export function DebitTransactions() {
       });
     }
 
+    // Apply bank filter (safety check - transactions should already be filtered by fetch, but this ensures consistency)
+    if (selectedBank && selectedBank !== 'all') {
+      const beforeFilterCount = filtered.length;
+      filtered = filtered.filter((t) => {
+        const transactionBank = t.bank || "HDFC"; // Default to HDFC for backward compatibility
+        const matches = transactionBank === selectedBank || 
+               transactionBank.toLowerCase() === selectedBank.toLowerCase();
+        if (!matches && selectedBank === 'Canara') {
+          console.log(`[Debit] Filtered out transaction: bank="${transactionBank}", selected="${selectedBank}"`);
+        }
+        return matches;
+      });
+      if (selectedBank === 'Canara') {
+        console.log(`[Debit] Bank filter: ${beforeFilterCount} -> ${filtered.length} transactions (selected: ${selectedBank})`);
+      }
+    }
+
     // Apply search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -318,7 +377,7 @@ export function DebitTransactions() {
     // Note: inputValues is accessed via closure but not in dependencies
     // This prevents re-renders while typing, but filter still works correctly
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, searchQuery, view, dateFrom, dateTo, dateSort]);
+  }, [transactions, searchQuery, view, dateFrom, dateTo, dateSort, selectedBank]);
 
   // Pagination calculations
   const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / itemsPerPage));
@@ -1460,6 +1519,19 @@ export function DebitTransactions() {
 
   return (
     <div className="space-y-8">
+      {/* Loading Bar */}
+      {isLoading && (
+        <div className="w-full bg-primary/5 border border-primary/20 rounded-lg overflow-hidden shadow-sm animate-fade-in">
+          <div className="h-1.5 bg-primary/20 w-full overflow-hidden relative">
+            <div className="h-full bg-primary absolute animate-[shimmer_1.5s_ease-in-out_infinite] w-1/3"></div>
+          </div>
+          <div className="px-4 py-3 text-sm text-foreground flex items-center gap-2 bg-primary/5">
+            <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+            <span className="font-medium">Loading debit transactions from <span className="font-bold">{selectedBank === 'all' ? 'all banks' : selectedBank}</span>...</span>
+          </div>
+        </div>
+      )}
+      
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -1646,6 +1718,39 @@ export function DebitTransactions() {
             </Card>
           </div>
 
+          {/* Bank Filter - Compact */}
+          <Card className="glass-card border border-border/60">
+            <CardContent className="p-3">
+              <div>
+                <Label htmlFor="bank-filter-debit-pending" className="text-xs font-semibold mb-1.5 block">Bank</Label>
+                <Select
+                  id="bank-filter-debit-pending"
+                  value={selectedBank}
+                  onChange={(e) => {
+                    const newBank = e.target.value;
+                    console.log('🔄 Bank changed to (Debit):', newBank);
+                    // Show loading immediately
+                    setIsLoading(true);
+                    isLoadingRef.current = true;
+                    // Reset to first page
+                    setCurrentPage(1);
+                    // Update bank state
+                    setSelectedBank(newBank);
+                    // Call loadTransactions immediately with the new bank (useEffect won't interfere)
+                    loadTransactions(newBank);
+                  }}
+                  className="h-9 text-sm w-full"
+                >
+                  {availableBanks.map((bank) => (
+                    <option key={bank.code} value={bank.code}>
+                      {bank.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Date Range Filter - Compact */}
           <Card className="glass-card border border-border/60">
             <CardContent className="p-3">
@@ -1825,6 +1930,36 @@ export function DebitTransactions() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10 border-2 border-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
+          </div>
+
+          {/* Bank Filter */}
+          <div>
+            <Label htmlFor="bank-filter-debit" className="text-xs font-semibold mb-1.5 block">Bank</Label>
+            <Select
+              id="bank-filter-debit"
+              value={selectedBank}
+              onChange={(e) => {
+                const newBank = e.target.value;
+                console.log('🔄 Bank changed to (Debit):', newBank, 'type:', typeof newBank);
+                // Show loading immediately
+                setIsLoading(true);
+                isLoadingRef.current = true;
+                // Reset to first page
+                setCurrentPage(1);
+                // Update bank state
+                setSelectedBank(newBank);
+                // Call loadTransactions immediately with the new bank
+                console.log('📞 Calling loadTransactions with bankOverride:', newBank);
+                loadTransactions(newBank);
+              }}
+              className="h-9 text-sm w-full border-2 border-slate-400 focus:border-primary"
+            >
+              {availableBanks.map((bank) => (
+                <option key={bank.code} value={bank.code}>
+                  {bank.name}
+                </option>
+              ))}
+            </Select>
           </div>
         </CardContent>
       </Card>

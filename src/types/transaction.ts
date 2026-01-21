@@ -12,6 +12,8 @@ export type TransactionCategory =
   | "Expense"
   | "Other Debit";
 
+export type BankName = "HDFC" | "Canara" | string; // Allow custom bank names
+
 export interface Transaction {
   id: string;
   date: string; // ISO date string
@@ -22,8 +24,9 @@ export interface Transaction {
   partyName: string;
   referenceNumber?: string; // Bank reference number (Chq./Ref.No.)
   bankAccount?: string;
+  bank?: BankName; // Bank name (e.g., "HDFC", "Canara")
   added_to_vyapar: boolean; // Renamed from inVyapar for consistency
-  vyapar_reference_number?: string; // Vyapar reference number
+  vyapar_reference_number?: string; // Vyapar reference number for mapping transactions across banks
   hold?: boolean; // Hold status - transaction is on hold
   selfTransfer?: boolean; // Self Transfer status - transaction is a self transfer
   notes?: string;

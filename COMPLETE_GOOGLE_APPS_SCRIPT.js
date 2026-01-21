@@ -1,10 +1,25 @@
-# Fixed Google Apps Script - Complete Working Version (Multi-Bank Support)
+/**
+ * COMPLETE GOOGLE APPS SCRIPT FOR MULTI-BANK TRANSACTION MANAGEMENT
+ * 
+ * This script handles:
+ * - Saving transactions (credit and debit) for multiple banks (HDFC, Canara, etc.)
+ * - Fetching transactions from bank-specific sheets
+ * - Party and Supplier mappings
+ * - Transaction updates
+ * 
+ * INSTRUCTIONS:
+ * 1. Copy this ENTIRE file
+ * 2. Open your Google Apps Script editor
+ * 3. Delete ALL existing code
+ * 4. Paste this complete script
+ * 5. Save (Ctrl+S / Cmd+S)
+ * 6. Deploy → Manage deployments → Edit → Deploy (or create new version)
+ */
 
-**IMPORTANT**: This script supports multiple banks (HDFC, Canara, etc.) and handles both credit and debit transactions. It reads the `sheetName` parameter to fetch from bank-specific sheets like `HDFC_CreditTransactions`, `Canara_DebitTransactions`, etc.
+// ============================================
+// FUNCTION 1: doPost - SAVE/UPDATE TRANSACTIONS
+// ============================================
 
-Copy and paste this **ENTIRE** script into your Google Apps Script editor and replace all existing code:
-
-```javascript
 function doPost(e) {
   try {
     // Handle case where e might be undefined (test calls, etc.)
@@ -332,6 +347,10 @@ function doPost(e) {
   }
 }
 
+// ============================================
+// FUNCTION 2: doGet - FETCH TRANSACTIONS
+// ============================================
+
 function doGet(e) {
   try {
     if (!e) {
@@ -536,6 +555,10 @@ function doGet(e) {
   }
 }
 
+// ============================================
+// FUNCTION 3: formatDateRows - HELPER FUNCTION
+// ============================================
+
 // Helper function to format date rows
 function formatDateRows(dataRows) {
   return dataRows.map(function(row) {
@@ -579,38 +602,4 @@ function formatDateRows(dataRows) {
     return formattedRow;
   });
 }
-```
-
-## Key Features:
-
-1. **Multi-Bank Support**: Handles bank-specific sheets (e.g., `HDFC_CreditTransactions`, `Canara_DebitTransactions`)
-2. **Fixed `appendRows` action**: Now correctly reads `e.parameter.sheetName` to determine which sheet to write to
-3. **Fixed `doGet` action**: Now reads `sheetName` parameter to fetch from bank-specific sheets
-4. **Backward Compatible**: Falls back to default sheets (`Transactions`, `DebitTransactions`) if bank-specific sheets don't exist
-5. **Added validation**: Checks if `dataArray[0]` is an array before processing
-6. **Better error logging**: Added detailed logging to help debug issues
-7. **Proper sheet routing**: Credit transactions go to bank-specific credit sheets, debit transactions go to bank-specific debit sheets
-
-## Supported Sheet Names:
-
-- **Credit Transactions**: `HDFC_CreditTransactions`, `Canara_CreditTransactions`, `Transactions` (legacy)
-- **Debit Transactions**: `HDFC_DebitTransactions`, `Canara_DebitTransactions`, `DebitTransactions` (legacy)
-
-## How to Deploy:
-
-1. Open your Google Apps Script editor
-2. Delete ALL existing code
-3. Copy and paste the ENTIRE script above
-4. Click **Save** (Ctrl+S or Cmd+S)
-5. Click **Deploy** → **New deployment**
-6. Select type: **Web app**
-7. Set:
-   - **Execute as**: Me (your email)
-   - **Who has access**: Anyone
-8. Click **Deploy**
-9. Copy the Web App URL and update your environment variable
-
-## Testing:
-
-After deploying, try uploading a CSV file. Check the **Executions** tab in Google Apps Script to see detailed logs of what's happening.
 

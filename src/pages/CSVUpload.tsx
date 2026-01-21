@@ -15,6 +15,7 @@ import { SupplierMappingService } from "../services/supplierMappingService";
 import { saveTransactionsToSheets, isGoogleSheetsConfigured, getGoogleSheetsURL, testGoogleSheetsConnection } from "../services/googleSheetsService";
 import { generateId, formatDate } from "../lib/utils";
 import { Upload, FileText, CheckCircle, XCircle, Sparkles, Copy, ExternalLink } from "lucide-react";
+import { getAvailableBanks, getBankConfig, BankConfig } from "../services/bankConfig";
 
 // Storage key for tracking uploaded files
 const UPLOADED_FILES_KEY = "uploaded_files_tracker";
@@ -92,8 +93,11 @@ export function CSVUpload() {
   const [isTestingSheets, setIsTestingSheets] = useState(false);
   const [suggestionsCache, setSuggestionsCache] = useState<Record<string, string | null>>({});
   const [transactionType, setTransactionType] = useState<'credit' | 'debit' | 'both'>('credit');
+  const [selectedBank, setSelectedBank] = useState<string>('HDFC'); // Default to HDFC for backward compatibility
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authURL, setAuthURL] = useState<string>('');
+  
+  const availableBanks = getAvailableBanks();
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -139,16 +143,19 @@ export function CSVUpload() {
       let transactions: Transaction[];
 
       if (fileName.endsWith(".csv")) {
-        console.log("Parsing bank CSV file:", selectedFile.name, "Transaction type:", transactionType);
-        transactions = await BankCSVParser.parseFile(selectedFile, transactionType);
+        console.log("Parsing bank CSV file:", selectedFile.name, "Bank:", selectedBank, "Transaction type:", transactionType);
+        transactions = await BankCSVParser.parseFile(selectedFile, transactionType, selectedBank);
       } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-        console.log("Parsing bank Excel file:", selectedFile.name, "Transaction type:", transactionType);
-        transactions = await BankExcelParser.parseFile(selectedFile, transactionType);
+        console.log("Parsing bank Excel file:", selectedFile.name, "Bank:", selectedBank, "Transaction type:", transactionType);
+        transactions = await BankExcelParser.parseFile(selectedFile, transactionType, selectedBank);
       } else {
         setError("Unsupported file format. Please use CSV or Excel files.");
         setIsParsing(false);
         return;
       }
+      
+      // Add bank to all transactions
+      transactions = transactions.map(t => ({ ...t, bank: selectedBank }));
 
       const typeLabel = transactionType === 'credit' ? 'credit' : transactionType === 'debit' ? 'debit' : 'credit and debit';
       console.log(`Parsed ${typeLabel} transactions:`, transactions.length);
@@ -445,6 +452,32 @@ export function CSVUpload() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
+            <div className="flex-1">
+              <Label htmlFor="bank-select" className="mb-2 block">
+                Bank
+              </Label>
+              <Select
+                id="bank-select"
+                value={selectedBank}
+                onChange={(e) => {
+                  setSelectedBank(e.target.value);
+                  setFile(null);
+                  setParsedTransactions([]);
+                  setError(null);
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = "";
+                  }
+                }}
+                disabled={isParsing}
+                className="w-full"
+              >
+                {availableBanks.map((bank) => (
+                  <option key={bank.code} value={bank.code}>
+                    {bank.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
             <div className="flex-1">
               <Label htmlFor="transaction-type" className="mb-2 block">
                 Transaction Type
