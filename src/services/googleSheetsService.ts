@@ -266,6 +266,7 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
       // Verify the update was successful (only if Vyapar ref is being set)
       // For other updates (hold, selfTransfer, etc.), skip verification
       if (transaction.vyapar_reference_number && transaction.vyapar_reference_number.trim() !== '') {
+        console.log(`Verifying update for ${transaction.id} with Vyapar ref: ${transaction.vyapar_reference_number}...`);
         const verification = await verifyTransactionUpdate(
           transaction.id,
           transaction.vyapar_reference_number,
@@ -275,14 +276,13 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
         );
         
         if (verification.success) {
-          console.log('✓ Transaction updated and verified in Google Sheets');
+          console.log('✅ Transaction updated and verified in Google Sheets');
           return { success: true };
         } else {
-          // Don't fail the update if verification fails - the update might have succeeded
-          // but verification couldn't find it (timing issue or wrong sheet)
-          console.warn('⚠️ Verification failed but update may have succeeded:', verification.error);
-          // Return success anyway - the update request was sent
-          return { success: true, error: verification.error };
+          console.error('❌ Verification failed after update:', verification.error);
+          // If verification fails but we sent the request, it's a "partial" success or a definite failure
+          // We'll return success: false to let the UI know it didn't verify
+          return { success: false, error: `Verification failed: ${verification.error || 'The update could not be confirmed in the sheet.'}` };
         }
       } else {
         // For updates without Vyapar ref (hold, selfTransfer, etc.), skip verification
