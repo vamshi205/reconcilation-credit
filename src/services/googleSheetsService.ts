@@ -54,7 +54,7 @@ export async function checkDuplicateVyaparRef(vyaparRef: string, excludeTransact
     const allCreditTransactions: Transaction[] = [];
     const allDebitTransactions: Transaction[] = [];
     const banks = getAvailableBanks();
-    
+
     // Fetch from all banks (including HDFC legacy)
     for (const bank of banks) {
       try {
@@ -66,7 +66,7 @@ export async function checkDuplicateVyaparRef(vyaparRef: string, excludeTransact
         console.log(`Error fetching from ${bank.code}, continuing...`, err);
       }
     }
-    
+
     // Also fetch from legacy sheets (HDFC)
     try {
       const legacyCredit = await fetchTransactionsFromSheets();
@@ -76,7 +76,7 @@ export async function checkDuplicateVyaparRef(vyaparRef: string, excludeTransact
     } catch (err) {
       console.log('Error fetching legacy transactions, continuing...', err);
     }
-    
+
     // Remove duplicates by ID (in case same transaction appears in multiple sheets)
     const uniqueTransactionsMap = new Map<string, Transaction>();
     [...allCreditTransactions, ...allDebitTransactions].forEach(t => {
@@ -115,8 +115,8 @@ export async function checkDuplicateVyaparRef(vyaparRef: string, excludeTransact
  * Now supports bank-specific sheets
  */
 export async function verifyTransactionUpdate(
-  transactionId: string, 
-  expectedVyaparRef: string, 
+  transactionId: string,
+  expectedVyaparRef: string,
   transactionType: 'credit' | 'debit' = 'credit',
   bank?: string,
   sheetName?: string
@@ -132,7 +132,7 @@ export async function verifyTransactionUpdate(
     // Fetch the transaction back from Google Sheets
     // Use bank-specific fetch if bank is provided
     let transactions: Transaction[] = [];
-    
+
     if (sheetName) {
       // Use the specific sheet name provided
       console.log(`Verifying update in sheet: ${sheetName}`);
@@ -146,11 +146,11 @@ export async function verifyTransactionUpdate(
       }
     } else {
       // Fallback to legacy sheets (HDFC)
-      transactions = transactionType === 'credit' 
-      ? await fetchTransactionsFromSheets()
-      : await fetchDebitTransactionsFromSheets();
+      transactions = transactionType === 'credit'
+        ? await fetchTransactionsFromSheets()
+        : await fetchDebitTransactionsFromSheets();
     }
-    
+
     const updatedTransaction = transactions.find(t => t.id === transactionId);
 
     if (!updatedTransaction) {
@@ -159,15 +159,15 @@ export async function verifyTransactionUpdate(
       // 2. Transaction is in a different sheet
       // 3. Transaction doesn't exist
       console.warn(`⚠️ Transaction ${transactionId} not found in ${sheetName || (bank || 'HDFC')} ${transactionType} sheet. This might be a timing issue.`);
-      
+
       // Wait a bit more and try once more
       await new Promise(resolve => setTimeout(resolve, 1000));
-      const retryTransactions = sheetName 
+      const retryTransactions = sheetName
         ? await fetchTransactionsFromSheet(sheetName, transactionType, bank)
-        : (transactionType === 'credit' 
+        : (transactionType === 'credit'
           ? await fetchCreditTransactionsFromBank(bank || 'HDFC')
           : await fetchDebitTransactionsFromBank(bank || 'HDFC'));
-      
+
       const retryTransaction = retryTransactions.find(t => t.id === transactionId);
       if (!retryTransaction) {
         // Still not found - but don't fail the update, it might have succeeded
@@ -175,26 +175,26 @@ export async function verifyTransactionUpdate(
         console.warn(`⚠️ Transaction still not found after retry. Update may have succeeded but verification failed.`);
         return { success: true, actualValue: 'N/A', error: 'Could not verify update (transaction not found in expected sheet)' };
       }
-      
+
       // Found on retry - use this transaction
-      const actualRef = retryTransaction.vyapar_reference_number 
-        ? String(retryTransaction.vyapar_reference_number).trim() 
+      const actualRef = retryTransaction.vyapar_reference_number
+        ? String(retryTransaction.vyapar_reference_number).trim()
         : '';
       const expectedRef = expectedVyaparRef.trim();
-      
+
       if (actualRef.toLowerCase() === expectedRef.toLowerCase()) {
         return { success: true, actualValue: actualRef };
       } else {
-        return { 
-          success: false, 
-          actualValue: actualRef, 
-          error: `Mismatch: Expected "${expectedRef}" but found "${actualRef}"` 
+        return {
+          success: false,
+          actualValue: actualRef,
+          error: `Mismatch: Expected "${expectedRef}" but found "${actualRef}"`
         };
       }
     }
 
-    const actualRef = updatedTransaction.vyapar_reference_number 
-      ? String(updatedTransaction.vyapar_reference_number).trim() 
+    const actualRef = updatedTransaction.vyapar_reference_number
+      ? String(updatedTransaction.vyapar_reference_number).trim()
       : '';
 
     const expectedRef = expectedVyaparRef.trim();
@@ -202,10 +202,10 @@ export async function verifyTransactionUpdate(
     if (actualRef.toLowerCase() === expectedRef.toLowerCase()) {
       return { success: true, actualValue: actualRef };
     } else {
-      return { 
-        success: false, 
-        actualValue: actualRef, 
-        error: `Mismatch: Expected "${expectedRef}" but found "${actualRef}"` 
+      return {
+        success: false,
+        actualValue: actualRef,
+        error: `Mismatch: Expected "${expectedRef}" but found "${actualRef}"`
       };
     }
   } catch (error) {
@@ -232,9 +232,14 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
     // Determine which sheet to update based on bank and transaction type
     const bank = transaction.bank || 'HDFC';
     const bankPrefix = getBankSheetPrefix(bank);
-    const sheetName = transaction.type === 'debit' 
-      ? `${bankPrefix}_DebitTransactions` 
+    let sheetName = transaction.type === 'debit'
+      ? `${bankPrefix}_DebitTransactions`
       : `${bankPrefix}_CreditTransactions`;
+
+    // BACKWARD COMPATIBILITY: Use 'Transactions' and 'DebitTransactions' for HDFC
+    if (bank === 'HDFC') {
+      sheetName = transaction.type === 'debit' ? 'DebitTransactions' : 'Transactions';
+    }
 
     console.log(`Updating ${transaction.type} transaction in Google Sheets (${sheetName}):`, { id: transaction.id, vyaparRef: transaction.vyapar_reference_number });
 
@@ -259,10 +264,10 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
       // Since we're using no-cors, we can't read the response
       // So we'll verify the update after a delay
       console.log('Update request sent, verifying...');
-      
+
       // Wait a bit for Google Sheets to process
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
+
       // Verify the update was successful (only if Vyapar ref is being set)
       // For other updates (hold, selfTransfer, etc.), skip verification
       if (transaction.vyapar_reference_number && transaction.vyapar_reference_number.trim() !== '') {
@@ -274,7 +279,7 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
           bank, // Pass bank to verification
           sheetName // Pass sheetName to verification
         );
-        
+
         if (verification.success) {
           console.log('✅ Transaction updated and verified in Google Sheets');
           return { success: true };
@@ -291,7 +296,7 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
       }
     } catch (fetchError) {
       console.warn('Fetch API failed, falling back to iframe method:', fetchError);
-      
+
       // Fallback to iframe method
       return new Promise((resolve) => {
         const iframe = document.createElement('iframe');
@@ -325,7 +330,7 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
 
         document.body.appendChild(form);
         form.submit();
-        
+
         // Clean up and verify after a delay
         setTimeout(async () => {
           try {
@@ -338,7 +343,7 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
           } catch (e) {
             // Already removed
           }
-          
+
           // Verify the update was successful (only if Vyapar ref is being set)
           // For other updates (hold, selfTransfer, etc.), skip verification
           if (transaction.vyapar_reference_number && transaction.vyapar_reference_number.trim() !== '') {
@@ -349,7 +354,7 @@ export async function updateTransactionInSheets(transaction: Transaction): Promi
               bank, // Pass bank to verification
               sheetName // Pass sheetName to verification
             );
-            
+
             if (verification.success) {
               console.log('✓ Transaction updated and verified in Google Sheets');
               resolve({ success: true });
@@ -393,15 +398,15 @@ export async function testGoogleSheetsConnection(): Promise<{ success: boolean; 
         method: 'GET',
         mode: 'no-cors', // Use no-cors to avoid CORS error
       });
-      
+
       // With no-cors, we can't read the response, but if it doesn't throw, the URL is accessible
       return { success: true, error: 'Connection test completed (CORS prevents reading response, but URL is accessible)' };
     } catch (fetchError) {
       // If it's a CORS error, that's actually normal for Google Apps Script
       if (fetchError instanceof TypeError && fetchError.message.includes('CORS')) {
-        return { 
-          success: true, 
-          error: 'CORS error is normal for Google Apps Script. The form submission method will work around this.' 
+        return {
+          success: true,
+          error: 'CORS error is normal for Google Apps Script. The form submission method will work around this.'
         };
       }
       throw fetchError;
@@ -427,9 +432,14 @@ export async function saveTransactionToSheets(transaction: Transaction): Promise
     // Determine which sheet to use based on bank and transaction type
     const bank = transaction.bank || 'HDFC';
     const bankPrefix = getBankSheetPrefix(bank);
-    const sheetName = transaction.type === 'debit' 
-      ? `${bankPrefix}_DebitTransactions` 
+    let sheetName = transaction.type === 'debit'
+      ? `${bankPrefix}_DebitTransactions`
       : `${bankPrefix}_CreditTransactions`;
+
+    // BACKWARD COMPATIBILITY: Use 'Transactions' and 'DebitTransactions' for HDFC
+    if (bank === 'HDFC') {
+      sheetName = transaction.type === 'debit' ? 'DebitTransactions' : 'Transactions';
+    }
 
     console.log(`Sending ${transaction.type} transaction to Google Sheets (${sheetName}):`, { rowCount: rowData.length });
 
@@ -472,7 +482,7 @@ export async function saveTransactionToSheets(transaction: Transaction): Promise
 
       // Submit and wait
       form.submit();
-      
+
       // Clean up after a delay
       setTimeout(() => {
         try {
@@ -516,7 +526,7 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
     const existingTransactions = await fetchTransactionsFromSheets();
     const existingDebitTransactions = await fetchDebitTransactionsFromSheets();
     const allExisting = [...existingTransactions, ...existingDebitTransactions];
-    
+
     // Create a Set of existing transaction keys
     const existingKeys = new Set<string>();
     allExisting.forEach(t => {
@@ -531,7 +541,7 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
       const refStr = (t.referenceNumber || '').trim();
       existingKeys.add(`composite:${dateStr}|${amountStr}|${descStr}|${refStr}`);
     });
-    
+
     // Filter out duplicates
     const uniqueTransactions = transactions.filter(t => {
       // Check by ID
@@ -553,13 +563,13 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
       }
       return true;
     });
-    
+
     // Calculate duplicates count (initialize to 0 if no duplicates)
-      const duplicatesCount = transactions.length - uniqueTransactions.length;
+    const duplicatesCount = transactions.length - uniqueTransactions.length;
     if (duplicatesCount > 0) {
       console.log(`⚠️ Removed ${duplicatesCount} duplicate transaction(s) before saving`);
     }
-    
+
     if (uniqueTransactions.length === 0) {
       console.log('All transactions were duplicates. Nothing to save.');
       return { success: 0, failed: transactions.length };
@@ -567,7 +577,7 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
 
     // Group transactions by bank, then by type (credit/debit)
     const transactionsByBank: Record<string, { credit: Transaction[], debit: Transaction[] }> = {};
-    
+
     uniqueTransactions.forEach(t => {
       const bank = t.bank || 'HDFC'; // Default to HDFC for backward compatibility
       if (!transactionsByBank[bank]) {
@@ -579,24 +589,29 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
         transactionsByBank[bank].credit.push(t);
       }
     });
-    
+
     console.log(`Grouped transactions by bank:`, Object.keys(transactionsByBank).map(bank => ({
       bank,
       credit: transactionsByBank[bank].credit.length,
       debit: transactionsByBank[bank].debit.length
     })));
-    
+
     let successCount = 0;
     let failedCount = duplicatesCount;
 
     // Send transactions for each bank
     for (const [bank, transactions] of Object.entries(transactionsByBank)) {
       const bankPrefix = getBankSheetPrefix(bank);
-      
+
       // Send credit transactions for this bank
       if (transactions.credit.length > 0) {
         const creditRows = transactions.credit.map(t => formatTransactionAsRow(t));
-        const sheetName = `${bankPrefix}_CreditTransactions`;
+        let sheetName = `${bankPrefix}_CreditTransactions`;
+
+        // BACKWARD COMPATIBILITY: Use 'Transactions' for HDFC credit
+        if (bank === 'HDFC') {
+          sheetName = 'Transactions';
+        }
         console.log(`Sending batch of ${creditRows.length} credit transactions for ${bank} to ${sheetName}...`);
         try {
           await sendBatchToSheets(creditRows, sheetName);
@@ -610,7 +625,12 @@ export async function saveTransactionsToSheets(transactions: Transaction[]): Pro
       // Send debit transactions for this bank
       if (transactions.debit.length > 0) {
         const debitRows = transactions.debit.map(t => formatTransactionAsRow(t));
-        const sheetName = `${bankPrefix}_DebitTransactions`;
+        let sheetName = `${bankPrefix}_DebitTransactions`;
+
+        // BACKWARD COMPATIBILITY: Use 'DebitTransactions' for HDFC debit
+        if (bank === 'HDFC') {
+          sheetName = 'DebitTransactions';
+        }
         console.log(`Sending batch of ${debitRows.length} debit transactions for ${bank} to ${sheetName}...`);
         try {
           await sendBatchToSheets(debitRows, sheetName);
@@ -665,8 +685,8 @@ async function sendBatchToSheets(rows: (string | number)[][], sheetName: string)
       data: JSON.stringify(rows), // Send all rows as JSON string
     };
 
-    console.log(`📤 Sending batch to ${sheetName} sheet:`, { 
-      action: payload.action, 
+    console.log(`📤 Sending batch to ${sheetName} sheet:`, {
+      action: payload.action,
       rowCount: rows.length,
       sheetName: sheetName,
       firstRowSample: rows[0]?.slice(0, 5) // Show first 5 columns of first row
@@ -685,25 +705,25 @@ async function sendBatchToSheets(rows: (string | number)[][], sheetName: string)
 
     // Submit and wait
     form.submit();
-    
+
     // Clean up after a delay
-      setTimeout(() => {
-        try {
-          if (document.body.contains(form)) {
-            document.body.removeChild(form);
-          }
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-        } catch (e) {
-          // Already removed
+    setTimeout(() => {
+      try {
+        if (document.body.contains(form)) {
+          document.body.removeChild(form);
         }
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      } catch (e) {
+        // Already removed
+      }
       console.log(`✓ Batch of ${rows.length} transactions sent to ${sheetName} sheet (check Google Sheets to verify)`);
       // Note: We can't verify the response with iframe method, so we just resolve
       // The actual success/failure will be visible in Google Sheets
       resolve();
-      }, 3000); // Give it a bit more time for batch processing
-    });
+    }, 3000); // Give it a bit more time for batch processing
+  });
 }
 
 /**
@@ -715,7 +735,7 @@ function formatTransactionAsRow(transaction: Transaction): (string | number)[] {
   // This function formats the date for Google Sheets in DD MMM YYYY format
   const dateValue = transaction.date; // Use original date value (ISO format: YYYY-MM-DD)
   console.log('📅 Formatting transaction date for Google Sheets:', dateValue, '->', formatDateForSheets(dateValue), 'for transaction:', transaction.id);
-  
+
   return [
     transaction.id, // Transaction ID (unique key) - FIRST COLUMN
     formatDateForSheets(dateValue), // Date - formatted as DD MMM YYYY for Google Sheets
@@ -751,7 +771,7 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
     });
 
     const responseText = await response.text();
-    
+
     // Check if response is HTML (sign-in page) instead of JSON
     if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
       console.error('Google Apps Script requires authorization.');
@@ -760,15 +780,15 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
 
     // Parse JSON response
     const result = JSON.parse(responseText);
-    
+
     if (result.success && result.data) {
       // Convert sheet rows to Transaction objects
       const transactions = result.data.map((row: any[]) => {
         // Column order: [ID, Date, Narration, Bank Ref No., Amount, Party Name, Category, Type, Added to Vyapar, Vyapar Ref No., Hold, Notes, Created At, Updated At]
-        
+
         // Get date as STRING from Google Sheets - keep exactly as shown in Google Sheets
         let dateStr = String(row[1] || '').trim();
-        
+
         // Helper function to add 1 day to a date
         const addOneDay = (year: number, month: number, day: number): { year: number; month: number; day: number } => {
           const date = new Date(year, month - 1, day);
@@ -779,7 +799,7 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
             day: date.getDate()
           };
         };
-        
+
         // If it's already in "DD MMM YYYY" format, parse it and add 1 day
         if (dateStr.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/)) {
           const match = dateStr.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/);
@@ -817,7 +837,7 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           dateStr = `${String(adjusted.day).padStart(2, '0')} ${monthNames[adjusted.month - 1]} ${adjusted.year}`;
         }
-        
+
         // If empty, use today's date in "DD MMM YYYY" format
         if (!dateStr) {
           const d = new Date();
@@ -827,7 +847,7 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           dateStr = `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
         }
-        
+
         // Parse amount - handle both number and string
         let amount = 0;
         if (typeof row[4] === 'number') {
@@ -836,7 +856,7 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
           // Remove commas and parse
           amount = parseFloat(row[4].replace(/,/g, '')) || 0;
         }
-        
+
         // Ensure vyapar_reference_number is a string or undefined
         let vyaparRef = row[9];
         if (vyaparRef !== null && vyaparRef !== undefined && vyaparRef !== '') {
@@ -845,7 +865,7 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
         } else {
           vyaparRef = undefined;
         }
-        
+
         // Ensure referenceNumber is a string or undefined
         let refNumber = row[3];
         if (refNumber !== null && refNumber !== undefined && refNumber !== '') {
@@ -854,7 +874,7 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
         } else {
           refNumber = undefined;
         }
-        
+
         // Ensure notes is a string or undefined
         let notesValue = row[11];
         if (notesValue !== null && notesValue !== undefined && notesValue !== '') {
@@ -863,7 +883,7 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
         } else {
           notesValue = undefined;
         }
-        
+
         // Determine bank from sheet name or use provided bankName
         let bank: string | undefined = bankName;
         if (!bank) {
@@ -876,7 +896,7 @@ async function fetchTransactionsFromSheet(sheetName: string, transactionType: 'c
             bank = 'HDFC';
           }
         }
-        
+
         // Debug: Log bank assignment for Canara
         if (bankName === 'Canara' || sheetName.includes('Canara')) {
           console.log(`Setting bank for transaction: bankName="${bankName}", sheetName="${sheetName}", extracted bank="${bank}"`);
@@ -929,7 +949,7 @@ export async function fetchCreditTransactionsFromBank(bankCode: string): Promise
       // For HDFC or "all", use the original function (backward compatibility)
       return await fetchTransactionsFromSheets();
     }
-    
+
     // For other banks, fetch from bank-specific sheet
     const sheetName = `${bankCode}_CreditTransactions`;
     console.log(`Fetching credit transactions from ${sheetName}...`);
@@ -971,15 +991,15 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
 
     // Parse JSON response
     const result = JSON.parse(responseText);
-    
+
     if (result.success && result.data) {
       // Convert sheet rows to Transaction objects
       const transactions = result.data.map((row: any[]) => {
         // Column order: [ID, Date, Narration, Bank Ref No., Amount, Party Name, Category, Type, Added to Vyapar, Vyapar Ref No., Hold, Notes, Created At, Updated At]
-        
+
         // Get date as STRING from Google Sheets - keep exactly as shown in Google Sheets
         let dateStr = String(row[1] || '').trim();
-        
+
         // Helper function to add 1 day to a date
         const addOneDay = (year: number, month: number, day: number): { year: number; month: number; day: number } => {
           const date = new Date(year, month - 1, day);
@@ -990,7 +1010,7 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
             day: date.getDate()
           };
         };
-        
+
         // If it's already in "DD MMM YYYY" format, parse it and add 1 day
         if (dateStr.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/)) {
           const match = dateStr.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/);
@@ -1028,7 +1048,7 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           dateStr = `${String(adjusted.day).padStart(2, '0')} ${monthNames[adjusted.month - 1]} ${adjusted.year}`;
         }
-        
+
         // If empty, use today's date in "DD MMM YYYY" format
         if (!dateStr) {
           const d = new Date();
@@ -1038,7 +1058,7 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           dateStr = `${String(day).padStart(2, '0')} ${monthNames[month - 1]} ${year}`;
         }
-        
+
         // Parse amount - handle both number and string
         let amount = 0;
         if (typeof row[4] === 'number') {
@@ -1047,7 +1067,7 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
           // Remove commas and parse
           amount = parseFloat(row[4].replace(/,/g, '')) || 0;
         }
-        
+
         // Ensure vyapar_reference_number is a string or undefined
         let vyaparRef = row[9];
         if (vyaparRef !== null && vyaparRef !== undefined && vyaparRef !== '') {
@@ -1056,7 +1076,7 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
         } else {
           vyaparRef = undefined;
         }
-        
+
         // Ensure referenceNumber is a string or undefined
         let refNumber = row[3];
         if (refNumber !== null && refNumber !== undefined && refNumber !== '') {
@@ -1065,7 +1085,7 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
         } else {
           refNumber = undefined;
         }
-        
+
         // Ensure notes is a string or undefined
         let notesValue = row[11];
         if (notesValue !== null && notesValue !== undefined && notesValue !== '') {
@@ -1074,7 +1094,7 @@ export async function fetchTransactionsFromSheets(): Promise<Transaction[]> {
         } else {
           notesValue = undefined;
         }
-        
+
         return {
           id: String(row[0] || '').trim() || '',
           date: dateStr || formatDateForSheets(new Date()),
@@ -1121,7 +1141,7 @@ export async function fetchDebitTransactionsFromBank(bankCode: string): Promise<
       // For HDFC or "all", use the original function (backward compatibility)
       return await fetchDebitTransactionsFromSheets();
     }
-    
+
     // For other banks, fetch from bank-specific sheet
     const sheetName = `${bankCode}_DebitTransactions`;
     console.log(`Fetching debit transactions from ${sheetName}...`);
@@ -1163,15 +1183,15 @@ export async function fetchDebitTransactionsFromSheets(): Promise<Transaction[]>
 
     // Parse JSON response
     const result = JSON.parse(responseText);
-    
+
     if (result.success && result.data) {
       // Convert sheet rows to Transaction objects (same format as fetchTransactionsFromSheets)
       const transactions = result.data.map((row: any[]) => {
         // Column order: [ID, Date, Narration, Bank Ref No., Amount, Party Name, Category, Type, Added to Vyapar, Vyapar Ref No., Hold, Notes, Created At, Updated At]
-        
+
         // Get date as STRING from Google Sheets - keep exactly as shown in Google Sheets
         let dateStr = String(row[1] || '').trim();
-        
+
         // Helper function to add 1 day to a date
         const addOneDay = (year: number, month: number, day: number): { year: number; month: number; day: number } => {
           const date = new Date(year, month - 1, day);
@@ -1182,7 +1202,7 @@ export async function fetchDebitTransactionsFromSheets(): Promise<Transaction[]>
             day: date.getDate()
           };
         };
-        
+
         // If it's already in "DD MMM YYYY" format, parse it and add 1 day
         const dateMatch = dateStr.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
         if (dateMatch) {
@@ -1197,7 +1217,7 @@ export async function fetchDebitTransactionsFromSheets(): Promise<Transaction[]>
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           dateStr = `${newDate.day} ${monthNames[newDate.month - 1]} ${newDate.year}`;
         }
-        
+
         // Parse amount - ensure it's a number
         let amount = 0;
         const amountValue = row[4];
@@ -1208,19 +1228,19 @@ export async function fetchDebitTransactionsFromSheets(): Promise<Transaction[]>
           const cleaned = amountValue.replace(/,/g, '').trim();
           amount = parseFloat(cleaned) || 0;
         }
-        
+
         // Parse reference number
         let refNumber = String(row[3] || '').trim();
         if (!refNumber || refNumber === 'undefined' || refNumber === 'null') {
           refNumber = '';
         }
-        
+
         // Parse Vyapar reference number
         let vyaparRef = String(row[9] || '').trim();
         if (!vyaparRef || vyaparRef === 'undefined' || vyaparRef === 'null') {
           vyaparRef = '';
         }
-        
+
         // Parse notes
         let notesValue: string | undefined;
         const notesStr = String(row[11] || '').trim();
@@ -1229,7 +1249,7 @@ export async function fetchDebitTransactionsFromSheets(): Promise<Transaction[]>
         } else {
           notesValue = undefined;
         }
-        
+
         return {
           id: String(row[0] || '').trim() || '',
           date: dateStr || formatDateForSheets(new Date()),
@@ -1290,15 +1310,15 @@ async function fetchDebitTransactionsFromSheets_OLD(): Promise<Transaction[]> {
 
     // Parse JSON response
     const result = JSON.parse(responseText);
-    
+
     if (result.success && result.data) {
       // Convert sheet rows to Transaction objects (same format as fetchTransactionsFromSheets)
       const transactions = result.data.map((row: any[]) => {
         // Column order: [ID, Date, Narration, Bank Ref No., Amount, Party Name, Category, Type, Added to Vyapar, Vyapar Ref No., Hold, Notes, Created At, Updated At]
-        
+
         // Get date as STRING from Google Sheets - keep exactly as shown in Google Sheets
         let dateStr = String(row[1] || '').trim();
-        
+
         // Helper function to add 1 day to a date
         const addOneDay = (year: number, month: number, day: number): { year: number; month: number; day: number } => {
           const date = new Date(year, month - 1, day);
@@ -1309,7 +1329,7 @@ async function fetchDebitTransactionsFromSheets_OLD(): Promise<Transaction[]> {
             day: date.getDate()
           };
         };
-        
+
         // If it's already in "DD MMM YYYY" format, parse it and add 1 day
         const dateMatch = dateStr.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
         if (dateMatch) {
@@ -1324,7 +1344,7 @@ async function fetchDebitTransactionsFromSheets_OLD(): Promise<Transaction[]> {
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           dateStr = `${newDate.day} ${monthNames[newDate.month - 1]} ${newDate.year}`;
         }
-        
+
         // Parse amount - ensure it's a number
         let amount = 0;
         const amountValue = row[4];
@@ -1335,19 +1355,19 @@ async function fetchDebitTransactionsFromSheets_OLD(): Promise<Transaction[]> {
           const cleaned = amountValue.replace(/,/g, '').trim();
           amount = parseFloat(cleaned) || 0;
         }
-        
+
         // Parse reference number
         let refNumber = String(row[3] || '').trim();
         if (!refNumber || refNumber === 'undefined' || refNumber === 'null') {
           refNumber = '';
         }
-        
+
         // Parse Vyapar reference number
         let vyaparRef = String(row[9] || '').trim();
         if (!vyaparRef || vyaparRef === 'undefined' || vyaparRef === 'null') {
           vyaparRef = '';
         }
-        
+
         // Parse notes
         let notesValue: string | undefined;
         const notesStr = String(row[11] || '').trim();
@@ -1356,7 +1376,7 @@ async function fetchDebitTransactionsFromSheets_OLD(): Promise<Transaction[]> {
         } else {
           notesValue = undefined;
         }
-        
+
         return {
           id: String(row[0] || '').trim() || '',
           date: dateStr || formatDateForSheets(new Date()),
@@ -1441,7 +1461,7 @@ export async function savePartyMappingToSheets(mapping: PartyNameMapping): Promi
         try {
           if (document.body.contains(form)) document.body.removeChild(form);
           if (document.body.contains(iframe)) document.body.removeChild(iframe);
-        } catch (e) {}
+        } catch (e) { }
         resolve(true);
       }, 2000);
     });
@@ -1503,7 +1523,7 @@ export async function updatePartyMappingInSheets(mapping: PartyNameMapping): Pro
         try {
           if (document.body.contains(form)) document.body.removeChild(form);
           if (document.body.contains(iframe)) document.body.removeChild(iframe);
-        } catch (e) {}
+        } catch (e) { }
         resolve(true);
       }, 2000);
     });
@@ -1527,13 +1547,13 @@ export async function fetchPartyMappingsFromSheets(): Promise<PartyNameMapping[]
     });
 
     const responseText = await response.text();
-    
+
     // Check if response is HTML (error page) instead of JSON
     if (responseText.trim().startsWith('<') || responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
       console.error('Google Apps Script returned HTML instead of JSON. Response:', responseText.substring(0, 200));
       return [];
     }
-    
+
     if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
       console.error('Google Apps Script requires authorization.');
       return [];
@@ -1548,7 +1568,7 @@ export async function fetchPartyMappingsFromSheets(): Promise<PartyNameMapping[]
       console.error('Parse error:', parseError);
       return [];
     }
-    
+
     if (result.success && result.data) {
       const mappings = result.data.map((row: any[]) => ({
         id: String(row[0] || ''),
@@ -1561,7 +1581,7 @@ export async function fetchPartyMappingsFromSheets(): Promise<PartyNameMapping[]
 
       return mappings;
     }
-    
+
     return [];
   } catch (error) {
     console.error('Error fetching party mappings from Google Sheets:', error);
@@ -1584,13 +1604,13 @@ export async function fetchPartiesFromSheets(): Promise<string[]> {
     });
 
     const responseText = await response.text();
-    
+
     // Check if response is HTML (error page) instead of JSON
     if (responseText.trim().startsWith('<') || responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
       console.error('Google Apps Script returned HTML instead of JSON. Response:', responseText.substring(0, 200));
       return [];
     }
-    
+
     if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
       console.error('Google Apps Script requires authorization.');
       return [];
@@ -1605,16 +1625,16 @@ export async function fetchPartiesFromSheets(): Promise<string[]> {
       console.error('Parse error:', parseError);
       return [];
     }
-    
+
     if (result.success && result.data) {
       // Extract party names from rows (assuming first column contains party name)
       const parties = result.data
         .map((row: any[]) => String(row[0] || '').trim())
         .filter((party: string) => party.length > 0);
-      
+
       return parties;
     }
-    
+
     return [];
   } catch (error) {
     console.error('Error fetching parties from Google Sheets:', error);
@@ -1636,13 +1656,13 @@ export async function fetchSuppliersFromSheets(): Promise<string[]> {
     });
 
     const responseText = await response.text();
-    
+
     // Check if response is HTML (error page) instead of JSON
     if (responseText.trim().startsWith('<') || responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
       console.error('Google Apps Script returned HTML instead of JSON. Response:', responseText.substring(0, 200));
       return [];
     }
-    
+
     if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
       console.error('Google Apps Script requires authorization.');
       return [];
@@ -1657,16 +1677,16 @@ export async function fetchSuppliersFromSheets(): Promise<string[]> {
       console.error('Parse error:', parseError);
       return [];
     }
-    
+
     if (result.success && result.data) {
       // Extract supplier names from rows (assuming first column contains supplier name)
       const suppliers = result.data
         .map((row: any[]) => String(row[0] || '').trim())
         .filter((supplier: string) => supplier.length > 0);
-      
+
       return suppliers;
     }
-    
+
     return [];
   } catch (error) {
     console.error('Error fetching suppliers from Google Sheets:', error);
@@ -1681,26 +1701,26 @@ export async function fetchSuppliersFromSheets(): Promise<string[]> {
  */
 export function scorePartyMatch(narration: string, partyName: string): number {
   if (!narration || !partyName) return 0;
-  
+
   const narrationLower = narration.toLowerCase();
   const partyLower = partyName.toLowerCase();
-  
+
   // Split party name into words (filter out very short words and common words)
   const partyWords = partyLower
     .split(/\s+/)
     .filter(word => word.length > 2) // Only consider words longer than 2 characters
     .filter(word => !/^(pvt|ltd|limited|private|inc|incorporated|llp|llc|and|the|of|for|to|in|on|at|by|with|from|hospital|hospitals)$/i.test(word)); // Filter common business words and "hospital"/"hospitals"
-  
+
   // If no significant words, return 0
   if (partyWords.length === 0) return 0;
-  
+
   // Count how many words match
   const matchingWords = partyWords.filter(word => narrationLower.includes(word));
   const matchRatio = matchingWords.length / partyWords.length;
-  
+
   // Require at least 50% of words to match
   if (matchRatio < 0.5) return 0;
-  
+
   // Return score (0.5 to 1.0 based on match ratio)
   return matchRatio;
 }
@@ -1711,7 +1731,7 @@ export function scorePartyMatch(narration: string, partyName: string): number {
  */
 export function findMatchingParties(narration: string, parties: string[], maxMatches: number = 3): string[] {
   if (!narration || parties.length === 0) return [];
-  
+
   // Score all parties
   const scoredParties = parties
     .map(party => ({
@@ -1723,7 +1743,7 @@ export function findMatchingParties(narration: string, parties: string[], maxMat
     .slice(0, maxMatches) // Take top matches
     .map(item => item.party) // Extract party names
     .filter(party => party && party.trim().length > 0); // Filter out blank/empty party names
-  
+
   return scoredParties;
 }
 
@@ -1785,7 +1805,7 @@ export async function copyTransactionsToClipboard(transactions: Transaction[]): 
   ];
 
   const csv = csvRows.join('\n');
-  
+
   try {
     await navigator.clipboard.writeText(csv);
     console.log('Transactions copied to clipboard');
@@ -1847,7 +1867,7 @@ export async function saveSupplierMappingToSheets(mapping: SupplierNameMapping):
         try {
           if (document.body.contains(form)) document.body.removeChild(form);
           if (document.body.contains(iframe)) document.body.removeChild(iframe);
-        } catch (e) {}
+        } catch (e) { }
         resolve(true);
       }, 2000);
     });
@@ -1909,7 +1929,7 @@ export async function updateSupplierMappingInSheets(mapping: SupplierNameMapping
         try {
           if (document.body.contains(form)) document.body.removeChild(form);
           if (document.body.contains(iframe)) document.body.removeChild(iframe);
-        } catch (e) {}
+        } catch (e) { }
         resolve(true);
       }, 2000);
     });
@@ -1933,13 +1953,13 @@ export async function fetchSupplierMappingsFromSheets(): Promise<SupplierNameMap
     });
 
     const responseText = await response.text();
-    
+
     // Check if response is HTML (error page) instead of JSON
     if (responseText.trim().startsWith('<') || responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
       console.error('Google Apps Script returned HTML instead of JSON. Response:', responseText.substring(0, 200));
       return [];
     }
-    
+
     if (responseText.includes('Sign in') || responseText.includes('Google Account')) {
       console.error('Google Apps Script requires authorization.');
       return [];
@@ -1954,7 +1974,7 @@ export async function fetchSupplierMappingsFromSheets(): Promise<SupplierNameMap
       console.error('Parse error:', parseError);
       return [];
     }
-    
+
     if (result.success && result.data) {
       const mappings = result.data.map((row: any[]) => ({
         id: String(row[0] || ''),
@@ -1967,7 +1987,7 @@ export async function fetchSupplierMappingsFromSheets(): Promise<SupplierNameMap
 
       return mappings;
     }
-    
+
     return [];
   } catch (error) {
     console.error('Error fetching supplier mappings from Google Sheets:', error);
